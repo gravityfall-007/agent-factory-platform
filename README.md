@@ -104,7 +104,7 @@ All routes are same-origin and return JSON unless noted.
 | `GET/POST/PUT/DELETE` | `/api/connectors…` | MCP connector metadata and bearer-token storage. |
 | `GET` | `/api/workspace/backup` | Download the workspace (no connector tokens). |
 | `POST` | `/api/workspace/restore` | Restore `{ "state": … }` with no active runs. |
-| `POST` | `/api/workspace/reset` | Restore seed data with no active runs. |
+| `POST` | `/api/workspace/reset` | Clear workspace data, or restore the seed with `{ "template": "seed" }`; no active runs. |
 | `GET` | `/api/health` | Liveness check. |
 
 Workspace-scoped API routes accept `X-Workspace-Id`; requests without it use the default workspace. Mutating requests require `Content-Type: application/json` and a same-origin browser context. Requests addressed to a non-loopback `Host` are rejected unless it is listed in `AGENT_FACTORY_ALLOWED_HOSTS`.
@@ -115,7 +115,7 @@ Workspace-scoped API routes accept `X-Workspace-Id`; requests without it use the
 - **Tool approvals are mandatory.** Every remote MCP call pauses for an explicit decision that displays the exact arguments. Approval may cause an external action.
 - **Connector URLs must be public HTTPS.** Embedded credentials, query strings, fragments, localhost, private networks, and cloud metadata addresses are rejected. The model gateway must be able to reach the endpoint.
 - **Tokens are local, not encrypted.** Bearer tokens are stored with owner-only permissions in ignored `data/connector-secrets.json`. Production should use a managed secret store.
-- **Workspace data is plaintext.** `data/workspace.json` contains prompts, results, and activity. Do not put customer secrets in it. Backups exclude connector tokens, but include all workspace content.
+- **Workspace data is plaintext.** Each `data/workspaces/<id>/workspace.json` contains prompts, results, and activity. Do not put customer secrets in it. Backups exclude connector tokens, but include all workspace content. Company workspaces are isolated data folders, not authenticated tenants.
 - **Prompt injection is not solved.** Model output is displayed as text, never executed, but an agent can still be persuaded to request a tool call. Read approval arguments before approving.
 - **Demo mode is simulated.** Demo results, tool outcomes, and usage are labeled as simulated and never claim an external action occurred.
 
@@ -139,7 +139,7 @@ The suite uses temporary data directories, a deterministic demo gateway, and fak
 - `lib/core.mjs` — limits, errors, and workspace validation.
 - `lib/connectors.mjs` — public-HTTPS connector URL policy.
 - `index.html`, `styles.css`, `app.js`, `theme.js` — browser UI and same-origin client.
-- `seed-data.json` — initial demo workspace.
+- `seed-data.json` — initial/default workspace seed and new-workspace tool/executive template.
 - `test/` — Node test suite.
 
 ### Data files
