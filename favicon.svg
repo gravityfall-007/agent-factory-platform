@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Agent Factory">
+  <rect width="64" height="64" rx="14" fill="#108361"/>
+  <g fill="#e8f6ef" transform="skewX(-12) translate(8 0)">
+    <rect x="16" y="26" width="7" height="20" rx="3.5" opacity=".65"/>
+    <rect x="28" y="16" width="7" height="30" rx="3.5"/>
+    <rect x="40" y="22" width="7" height="24" rx="3.5" opacity=".82"/>
+  </g>
+</svg>

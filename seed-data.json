@@ -5,34 +5,226 @@
     "role": "Executive agent · CEO",
     "branch": "Executive",
     "status": "active",
-    "tools": ["Slack", "Notion"]
+    "tools": [
+      "Slack",
+      "Notion"
+    ]
   },
   "agents": [
-    { "id": "maya", "name": "Maya Chen", "role": "Customer Success Lead", "branch": "San Francisco", "managerId": "exec", "capabilities": ["renewal planning", "account research"], "status": "active", "tools": ["Slack", "Salesforce", "Notion"] },
-    { "id": "theo", "name": "Theo Park", "role": "Revenue Analyst", "branch": "San Francisco", "managerId": "exec", "capabilities": ["pipeline analysis", "forecasting"], "status": "active", "tools": ["Salesforce", "Snowflake"] },
-    { "id": "sofia", "name": "Sofia Weber", "role": "People Operations", "branch": "Berlin", "managerId": "exec", "capabilities": ["onboarding", "policy lookup"], "status": "active", "tools": ["Slack", "Notion"] },
-    { "id": "jonas", "name": "Jonas Richter", "role": "Product Researcher", "branch": "Berlin", "managerId": "exec", "capabilities": ["feedback analysis", "research synthesis"], "status": "idle", "tools": ["Notion", "Snowflake"] },
-    { "id": "amara", "name": "Amara Tan", "role": "Support Specialist", "branch": "Singapore", "managerId": "exec", "capabilities": ["case triage", "support response drafts"], "status": "active", "tools": ["Slack", "Salesforce"] },
-    { "id": "ethan", "name": "Ethan Brooks", "role": "Marketing Coordinator", "branch": "Remote", "managerId": "exec", "capabilities": ["campaign planning", "content briefs"], "status": "active", "tools": ["Slack", "Notion"] }
+    {
+      "id": "maya",
+      "name": "Maya Chen",
+      "role": "Customer Success Lead",
+      "branch": "San Francisco",
+      "managerId": "exec",
+      "capabilities": [
+        "renewal planning",
+        "account research"
+      ],
+      "status": "active",
+      "tools": [
+        "Slack",
+        "Salesforce",
+        "Notion"
+      ]
+    },
+    {
+      "id": "theo",
+      "name": "Theo Park",
+      "role": "Revenue Analyst",
+      "branch": "San Francisco",
+      "managerId": "exec",
+      "capabilities": [
+        "pipeline analysis",
+        "forecasting"
+      ],
+      "status": "active",
+      "tools": [
+        "Salesforce",
+        "Snowflake"
+      ]
+    },
+    {
+      "id": "sofia",
+      "name": "Sofia Weber",
+      "role": "People Operations",
+      "branch": "Berlin",
+      "managerId": "exec",
+      "capabilities": [
+        "onboarding",
+        "policy lookup"
+      ],
+      "status": "active",
+      "tools": [
+        "Slack",
+        "Notion"
+      ]
+    },
+    {
+      "id": "jonas",
+      "name": "Jonas Richter",
+      "role": "Product Researcher",
+      "branch": "Berlin",
+      "managerId": "exec",
+      "capabilities": [
+        "feedback analysis",
+        "research synthesis"
+      ],
+      "status": "idle",
+      "tools": [
+        "Notion",
+        "Snowflake"
+      ]
+    },
+    {
+      "id": "amara",
+      "name": "Amara Tan",
+      "role": "Support Specialist",
+      "branch": "Singapore",
+      "managerId": "exec",
+      "capabilities": [
+        "case triage",
+        "support response drafts"
+      ],
+      "status": "active",
+      "tools": [
+        "Slack",
+        "Salesforce"
+      ]
+    },
+    {
+      "id": "ethan",
+      "name": "Ethan Brooks",
+      "role": "Marketing Coordinator",
+      "branch": "Remote",
+      "managerId": "exec",
+      "capabilities": [
+        "campaign planning",
+        "content briefs"
+      ],
+      "status": "active",
+      "tools": [
+        "Slack",
+        "Notion"
+      ]
+    }
   ],
   "tools": [
-    { "name": "Salesforce", "category": "CRM", "connected": true, "glyph": "S", "style": "crm" },
-    { "name": "Slack", "category": "Communication", "connected": true, "glyph": "#", "style": "chat" },
-    { "name": "Notion", "category": "Knowledge", "connected": true, "glyph": "N", "style": "docs" },
-    { "name": "Snowflake", "category": "Data & analytics", "connected": true, "glyph": "❄", "style": "data" }
+    {
+      "name": "Salesforce",
+      "category": "CRM",
+      "connected": true,
+      "glyph": "S",
+      "style": "crm"
+    },
+    {
+      "name": "Slack",
+      "category": "Communication",
+      "connected": true,
+      "glyph": "#",
+      "style": "chat"
+    },
+    {
+      "name": "Notion",
+      "category": "Knowledge",
+      "connected": true,
+      "glyph": "N",
+      "style": "docs"
+    },
+    {
+      "name": "Snowflake",
+      "category": "Data & analytics",
+      "connected": true,
+      "glyph": "❄",
+      "style": "data"
+    }
   ],
   "connectors": [],
   "approvals": [
-    { "id": "approval-1", "agent": "Maya Chen", "initials": "MC", "action": "Send renewal offer to Acme Studio", "detail": "18% discount · Annual plan · $24,600 ARR", "time": "4 min ago" },
-    { "id": "approval-2", "agent": "Theo Park", "initials": "TP", "action": "Publish Q4 pipeline forecast", "detail": "External report · 3 regional segments", "time": "22 min ago" }
+    {
+      "id": "approval-1",
+      "agent": "Maya Chen",
+      "initials": "MC",
+      "action": "Send renewal offer to Acme Studio",
+      "detail": "18% discount · Annual plan · $24,600 ARR",
+      "time": "4 min ago"
+    },
+    {
+      "id": "approval-2",
+      "agent": "Theo Park",
+      "initials": "TP",
+      "action": "Publish Q4 pipeline forecast",
+      "detail": "External report · 3 regional segments",
+      "time": "22 min ago"
+    }
   ],
   "activities": [
-    { "id": "evt-1", "kind": "complete", "icon": "✓", "agent": "Sofia Weber", "action": "finished onboarding checklist for", "target": "Northwind GmbH", "detail": "Berlin · Notion", "time": "2 min ago" },
-    { "id": "evt-2", "kind": "approval", "icon": "◷", "agent": "Maya Chen", "action": "requested approval to send a renewal offer", "target": "Acme Studio", "detail": "San Francisco · Salesforce", "time": "4 min ago" },
-    { "id": "evt-3", "kind": "tool", "icon": "↗", "agent": "Ethan Brooks", "action": "drafted campaign brief from", "target": "Launch planning notes", "detail": "Remote · Notion", "time": "11 min ago" },
-    { "id": "evt-4", "kind": "complete", "icon": "✓", "agent": "Amara Tan", "action": "resolved a support request for", "target": "Morrow Health", "detail": "Singapore · Salesforce", "time": "18 min ago" },
-    { "id": "evt-5", "kind": "approval", "icon": "◷", "agent": "Theo Park", "action": "requested review of the", "target": "Q4 pipeline forecast", "detail": "San Francisco · Snowflake", "time": "22 min ago" },
-    { "id": "evt-6", "kind": "tool", "icon": "↗", "agent": "Jonas Richter", "action": "summarized research signals in", "target": "Customer feedback digest", "detail": "Berlin · Snowflake", "time": "35 min ago" }
+    {
+      "id": "evt-1",
+      "kind": "complete",
+      "icon": "✓",
+      "agent": "Sofia Weber",
+      "action": "finished onboarding checklist for",
+      "target": "Northwind GmbH",
+      "detail": "Berlin · Notion",
+      "time": "2 min ago"
+    },
+    {
+      "id": "evt-2",
+      "kind": "approval",
+      "icon": "◷",
+      "agent": "Maya Chen",
+      "action": "requested approval to send a renewal offer",
+      "target": "Acme Studio",
+      "detail": "San Francisco · Salesforce",
+      "time": "4 min ago"
+    },
+    {
+      "id": "evt-3",
+      "kind": "tool",
+      "icon": "↗",
+      "agent": "Ethan Brooks",
+      "action": "drafted campaign brief from",
+      "target": "Launch planning notes",
+      "detail": "Remote · Notion",
+      "time": "11 min ago"
+    },
+    {
+      "id": "evt-4",
+      "kind": "complete",
+      "icon": "✓",
+      "agent": "Amara Tan",
+      "action": "resolved a support request for",
+      "target": "Morrow Health",
+      "detail": "Singapore · Salesforce",
+      "time": "18 min ago"
+    },
+    {
+      "id": "evt-5",
+      "kind": "approval",
+      "icon": "◷",
+      "agent": "Theo Park",
+      "action": "requested review of the",
+      "target": "Q4 pipeline forecast",
+      "detail": "San Francisco · Snowflake",
+      "time": "22 min ago"
+    },
+    {
+      "id": "evt-6",
+      "kind": "tool",
+      "icon": "↗",
+      "agent": "Jonas Richter",
+      "action": "summarized research signals in",
+      "target": "Customer feedback digest",
+      "detail": "Berlin · Snowflake",
+      "time": "35 min ago"
+    }
   ],
-  "tasks": []
+  "tasks": [],
+  "schemaVersion": 3,
+  "usage": {
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "totalTokens": 0
+  }
 }

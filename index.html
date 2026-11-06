@@ -4,11 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#101412" />
-    <meta name="description" content="Agent Factory is a simulated operations console for digital employees." />
+    <meta name="description" content="Agent Factory is a local operations console for a model-backed digital workforce: plan, delegate, approve external tool calls, and inspect every run." />
     <title>Agent Factory — Operations</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <script src="theme.js"></script>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <a class="skip-link" href="#overview">Skip to main content</a>
     <div class="app-shell">
       <aside class="sidebar" aria-label="Main navigation">
         <a class="brand" href="#overview" aria-label="Agent Factory home">
@@ -18,40 +21,46 @@
 
         <div class="workspace-switcher">
           <div class="workspace-avatar">N</div>
-          <div class="workspace-copy"><strong>Northstar Labs</strong><small>Workspace</small></div>
+          <div class="workspace-copy"><strong>Northstar Labs</strong><small>Local workspace</small></div>
           <span class="chevron" aria-hidden="true">⌄</span>
         </div>
 
         <div class="nav-label">WORKSPACE</div>
-        <nav class="primary-nav">
-          <a class="nav-item active" href="#overview" data-view="overview"><span class="nav-icon">◫</span>Overview</a>
-          <a class="nav-item" href="#employees" data-view="employees"><span class="nav-icon">♙</span>Employees <span class="nav-count" id="agent-nav-count">6</span></a>
-          <a class="nav-item" href="#approvals" data-view="approvals"><span class="nav-icon">◷</span>Approvals <span class="nav-count attention" id="approval-nav-count">2</span></a>
-          <a class="nav-item" href="#integrations" data-view="integrations"><span class="nav-icon">⌘</span>Integrations</a>
-          <a class="nav-item" href="#activity" data-view="activity"><span class="nav-icon">≋</span>Activity</a>
+        <nav class="primary-nav" aria-label="Workspace sections">
+          <a class="nav-item active" href="#overview" data-view="overview"><span class="nav-icon" aria-hidden="true">◫</span>Overview</a>
+          <a class="nav-item" href="#employees" data-view="employees"><span class="nav-icon" aria-hidden="true">♙</span>Employees <span class="nav-count" id="agent-nav-count">0</span></a>
+          <a class="nav-item" href="#runs" data-view="runs"><span class="nav-icon" aria-hidden="true">▤</span>Runs <span class="nav-count" id="runs-nav-count">0</span></a>
+          <a class="nav-item" href="#approvals" data-view="approvals"><span class="nav-icon" aria-hidden="true">◷</span>Approvals <span class="nav-count" id="approval-nav-count">0</span></a>
+          <a class="nav-item" href="#integrations" data-view="integrations"><span class="nav-icon" aria-hidden="true">⌘</span>Integrations</a>
+          <a class="nav-item" href="#activity" data-view="activity"><span class="nav-icon" aria-hidden="true">≋</span>Activity</a>
         </nav>
 
         <div class="nav-label branch-label">BRANCHES</div>
-        <div class="branch-list">
-          <a href="#employees" class="branch-item" data-branch="all"><span class="branch-dot all-dot">✳</span>All branches <span class="branch-count">4</span></a>
-          <a href="#employees" class="branch-item" data-branch="San Francisco"><span class="branch-dot sf"></span>San Francisco <span class="branch-count">2</span></a>
-          <a href="#employees" class="branch-item" data-branch="Berlin"><span class="branch-dot berlin"></span>Berlin <span class="branch-count">2</span></a>
-          <a href="#employees" class="branch-item" data-branch="Singapore"><span class="branch-dot singapore"></span>Singapore <span class="branch-count">1</span></a>
-          <a href="#employees" class="branch-item" data-branch="Remote"><span class="branch-dot remote"></span>Remote <span class="branch-count">1</span></a>
-        </div>
+        <div class="branch-list" id="branch-list" aria-label="Branches"></div>
 
         <div class="sidebar-spacer"></div>
-        <div class="usage-card">
-          <div class="usage-top"><span>Demo token budget</span><span class="usage-percent">68%</span></div>
-          <div class="usage-track"><span></span></div>
-          <p>68.4k of 100k simulated tokens</p>
-          <button class="usage-link" id="usage-info-button">View demo usage <span>↗</span></button>
+        <div class="usage-card" id="usage-card">
+          <div class="usage-top"><span>Local token budget</span><span class="usage-percent" id="usage-percent">0%</span></div>
+          <div class="usage-track" role="progressbar" aria-label="Token budget used" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="usage-track"><span id="usage-fill"></span></div>
+          <p id="usage-copy">Waiting for workspace…</p>
+          <button class="usage-link" id="usage-info-button" type="button">View usage report <span aria-hidden="true">↗</span></button>
         </div>
-        <button class="profile-button">
-          <span class="profile-avatar">JD</span>
-          <span class="profile-copy"><strong>Jordan Davis</strong><small>Workspace admin</small></span>
-          <span class="chevron">⌄</span>
-        </button>
+
+        <div class="profile-wrap">
+          <button class="profile-button" id="profile-button" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="profile-menu">
+            <span class="profile-avatar">JD</span>
+            <span class="profile-copy"><strong>Jordan Davis</strong><small>Workspace admin</small></span>
+            <span class="chevron" aria-hidden="true">⌄</span>
+          </button>
+          <div class="profile-menu" id="profile-menu" role="menu" hidden>
+            <button type="button" role="menuitem" data-menu="usage"><span aria-hidden="true">∑</span> Usage report</button>
+            <button type="button" role="menuitem" data-menu="backup"><span aria-hidden="true">↓</span> Download backup</button>
+            <button type="button" role="menuitem" data-menu="restore"><span aria-hidden="true">↑</span> Restore backup…</button>
+            <button type="button" role="menuitem" data-menu="theme"><span aria-hidden="true">◐</span> Switch theme</button>
+            <button type="button" role="menuitem" data-menu="help"><span aria-hidden="true">?</span> Help & shortcuts</button>
+            <button type="button" role="menuitem" class="danger-link" data-menu="reset"><span aria-hidden="true">⟲</span> Reset demo workspace</button>
+          </div>
+        </div>
       </aside>
 
       <main class="main-content" id="overview">
@@ -59,45 +68,46 @@
           <div class="breadcrumbs"><span>Workspace</span><span class="crumb-slash">/</span><strong id="current-view-label">Overview</strong></div>
           <div class="topbar-actions">
             <div class="demo-pill gateway-pill" id="gateway-status" role="status" aria-live="polite"><span class="demo-pulse"></span> CHECKING MODEL GATEWAY</div>
-            <button class="icon-button" aria-label="Search" title="Search">⌕</button>
-            <button class="icon-button notification-button" aria-label="Notifications" title="Notifications">♧<i></i></button>
-            <button class="help-button">Help <span>↗</span></button>
+            <button class="icon-button" id="palette-button" aria-label="Search workspace" title="Search (Ctrl K)">⌕</button>
+            <button class="icon-button" id="theme-toggle" aria-label="Switch theme" title="Switch theme">◐</button>
+            <button class="icon-button notification-button" id="notification-button" aria-label="Notifications" title="Notifications">♧<i></i></button>
+            <button class="help-button" id="help-button" type="button">Help <span aria-hidden="true">↗</span></button>
           </div>
         </header>
 
         <div class="content-wrap">
           <section class="page-heading">
             <div>
-              <div class="eyebrow"><span class="eyebrow-line"></span>FRIDAY, OCTOBER 24, 2025</div>
+              <div class="eyebrow"><span class="eyebrow-line"></span><span id="today-label">TODAY</span></div>
               <h1>Good morning, Jordan <span class="wave">✳</span></h1>
               <p class="page-subtitle">Here's what's happening across your digital workforce.</p>
             </div>
             <div class="heading-actions">
-              <button class="button button-quiet" id="export-button"><span>↓</span> Export report</button>
-              <button class="button button-primary" id="add-agent-button"><span class="button-plus">+</span> Create employee</button>
+              <button class="button button-quiet" id="export-button" type="button"><span aria-hidden="true">↓</span> Export roster</button>
+              <button class="button button-primary" id="add-agent-button" type="button"><span class="button-plus" aria-hidden="true">+</span> Create employee</button>
             </div>
           </section>
 
-          <section class="metrics-grid" aria-label="Simulated organization metrics">
+          <section class="metrics-grid" aria-label="Workspace metrics">
             <article class="metric-card">
-              <div class="metric-label">Active agents <span class="metric-source">DEMO</span><span class="metric-icon green">♙</span></div>
-              <div class="metric-value" id="active-agents-metric">6<span class="metric-total"> / 7</span></div>
-              <div class="metric-foot"><span class="trend up">↑ 2</span><span>vs. last week · seeded</span><div class="sparkline green-spark"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+              <div class="metric-label">Active agents <span class="metric-source">LIVE</span><span class="metric-icon green" aria-hidden="true">♙</span></div>
+              <div class="metric-value" id="active-agents-metric">—</div>
+              <div class="metric-foot" id="active-agents-foot">Loading…</div>
             </article>
             <article class="metric-card">
-              <div class="metric-label">Tasks completed <span class="metric-source">DEMO</span><span class="metric-icon blue">✓</span></div>
-              <div class="metric-value">1,284</div>
-              <div class="metric-foot"><span class="trend up">↑ 12.8%</span><span>vs. last week · seeded</span><div class="sparkline blue-spark"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+              <div class="metric-label">Runs completed <span class="metric-source">LIVE</span><span class="metric-icon blue" aria-hidden="true">✓</span></div>
+              <div class="metric-value" id="completed-runs-metric">—</div>
+              <div class="metric-foot" id="completed-runs-foot">Loading…</div>
             </article>
             <article class="metric-card">
-              <div class="metric-label">Awaiting approval <span class="metric-source">DEMO</span><span class="metric-icon amber">◷</span></div>
-              <div class="metric-value" id="pending-approvals-metric">02</div>
-              <div class="metric-foot"><span class="trend flat">Needs attention</span><span id="approval-employee-count">across 2 employees</span><div class="sparkline amber-spark"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+              <div class="metric-label">Awaiting approval <span class="metric-source">LIVE</span><span class="metric-icon amber" aria-hidden="true">◷</span></div>
+              <div class="metric-value" id="pending-approvals-metric">—</div>
+              <div class="metric-foot"><span id="approval-employee-count">across 0 employees</span></div>
             </article>
             <article class="metric-card">
-              <div class="metric-label">Hours saved <span class="metric-source">DEMO</span><span class="metric-icon violet">◴</span></div>
-              <div class="metric-value">342<span class="metric-unit">h</span></div>
-              <div class="metric-foot"><span class="trend up">↑ 8.4%</span><span>this month · seeded</span><div class="sparkline violet-spark"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+              <div class="metric-label">Tokens used <span class="metric-source">MEASURED</span><span class="metric-icon violet" aria-hidden="true">◴</span></div>
+              <div class="metric-value" id="tokens-metric">—</div>
+              <div class="metric-foot" id="tokens-foot">of local budget</div>
             </article>
           </section>
 
@@ -105,61 +115,88 @@
             <div class="task-panel-copy">
               <div class="eyebrow"><span class="eyebrow-line"></span>EXECUTIVE WORKBENCH</div>
               <h2 id="task-panel-title">Give your executive a task</h2>
-              <p class="panel-subtitle">The CEO agent will plan the work, delegate to specialists, and synthesize their results.</p>
+              <p class="panel-subtitle">The CEO agent plans the work, delegates to specialists, and synthesizes their results. Progress streams in live.</p>
             </div>
             <form id="task-form" class="task-form">
               <label class="sr-only" for="task-prompt">Task for the executive agent</label>
-              <textarea id="task-prompt" name="prompt" rows="3" maxlength="4000" placeholder="What should your digital workforce work on?" required></textarea>
+              <textarea id="task-prompt" name="prompt" rows="3" maxlength="6000" placeholder="What should your digital workforce work on?" required></textarea>
               <div class="task-form-footer">
-                <span class="task-safety-note"><span aria-hidden="true">ⓘ</span> Model calls are live when configured. Granted MCP tools pause for your approval before an external call.</span>
+                <span class="task-safety-note"><span aria-hidden="true">ⓘ</span> Model calls are live when configured. Granted MCP tools pause for your approval before any external call.</span>
                 <button class="button button-primary" id="run-task-button" type="submit"><span aria-hidden="true">↗</span> Run task</button>
               </div>
             </form>
             <div class="task-message" id="task-message" role="status" aria-live="polite">Checking local server…</div>
-            <div class="task-results" id="task-results" aria-live="polite"></div>
+            <div class="live-run" id="live-run" aria-live="polite" hidden></div>
+            <div class="task-results" id="task-results"></div>
           </section>
 
           <section class="overview-grid">
-            <article class="panel org-panel" id="employees">
+            <article class="panel org-panel" id="employees" aria-labelledby="org-title">
               <div class="panel-header">
-          <div><div class="panel-title-row"><h2>Organization structure</h2><span class="live-tag"><i></i> DEMO</span></div><p class="panel-subtitle">Your executive agent and branch employees</p></div>
-                <button class="text-button" id="view-all-agents">View all employees <span>→</span></button>
+                <div><div class="panel-title-row"><h2 id="org-title">Organization structure</h2><span class="live-tag"><i></i> LOCAL</span></div><p class="panel-subtitle">Your executive agent and branch employees</p></div>
+                <button class="text-button" id="view-all-agents" type="button">View all employees <span aria-hidden="true">→</span></button>
               </div>
               <div class="org-chart" id="org-chart"></div>
             </article>
 
-            <article class="panel approvals-panel" id="approvals">
+            <article class="panel approvals-panel" id="approvals" aria-labelledby="approvals-title">
               <div class="panel-header approval-header">
-                <div><div class="panel-title-row"><h2>Needs your attention</h2><span class="count-badge" id="approval-count-badge">2</span></div><p class="panel-subtitle">Review local examples and requested MCP actions</p></div>
-                <button class="more-button" aria-label="More approval options">···</button>
+                <div><div class="panel-title-row"><h2 id="approvals-title">Needs your attention</h2><span class="count-badge" id="approval-count-badge">0</span></div><p class="panel-subtitle">Seed examples and external tool calls</p></div>
+                <button class="more-button" type="button" id="approvals-more" aria-label="About approvals">···</button>
               </div>
               <div class="approval-list" id="approval-list"></div>
               <div class="mcp-pending-list" id="mcp-pending-list"></div>
-              <button class="approval-footer" id="all-approvals">View approval history <span>→</span></button>
+              <button class="approval-footer" id="all-approvals" type="button">View approval history <span aria-hidden="true">→</span></button>
             </article>
           </section>
 
           <section class="bottom-grid">
-            <article class="panel activity-panel" id="activity">
+            <article class="panel activity-panel" id="activity" aria-labelledby="activity-title">
               <div class="panel-header">
-                <div><div class="panel-title-row"><h2>Activity feed</h2><span class="live-tag"><i></i> LOCAL HISTORY</span></div><p class="panel-subtitle">Seeded examples and persisted task runs</p></div>
-                <div class="activity-actions"><button class="filter-button" id="activity-filter">All activity <span>⌄</span></button><button class="more-button" aria-label="More activity options">···</button></div>
+                <div><div class="panel-title-row"><h2 id="activity-title">Activity feed</h2><span class="live-tag"><i></i> LOCAL HISTORY</span></div><p class="panel-subtitle">Workspace changes and completed runs</p></div>
+                <div class="activity-actions">
+                  <label class="sr-only" for="activity-filter">Filter activity</label>
+                  <select class="filter-button" id="activity-filter">
+                    <option value="all">All activity</option>
+                    <option value="runs">Runs</option>
+                    <option value="approvals">Approvals</option>
+                    <option value="tools">Tool labels</option>
+                  </select>
+                </div>
               </div>
               <div class="activity-feed" id="activity-feed"></div>
-              <button class="activity-footer" id="load-activity">View all activity <span>→</span></button>
+              <button class="activity-footer" id="load-activity" type="button">View all activity <span aria-hidden="true">→</span></button>
             </article>
 
-            <article class="panel integrations-panel" id="integrations">
+            <article class="panel integrations-panel" id="integrations" aria-labelledby="integrations-title">
               <div class="panel-header">
-                <div><div class="panel-title-row"><h2>Integrations</h2><span class="tool-count" id="tool-count">4 tools</span></div><p class="panel-subtitle">MCP connections run through the server after approval</p></div>
-                <button class="connect-tool-button compact" id="add-mcp-connector">+ Add MCP server</button>
+                <div><div class="panel-title-row"><h2 id="integrations-title">Integrations</h2><span class="tool-count" id="tool-count">0 labels</span></div><p class="panel-subtitle">Remote MCP servers and tool permission labels</p></div>
+                <button class="connect-tool-button compact" id="add-mcp-connector" type="button">+ Add MCP server</button>
               </div>
-              <div class="mcp-warning">MCP tools send their displayed arguments to the configured remote server after you approve each call. Connector bearer tokens are stored locally without encryption.</div>
+              <div class="mcp-warning">MCP tools send the displayed arguments to the configured remote server after you approve each call. Connector bearer tokens are stored locally without encryption.</div>
               <div class="mcp-connector-list" id="mcp-connector-list"><div class="approval-empty">Loading connector settings…</div></div>
               <div class="panel-subsection-title"><strong>Tool catalog</strong><small>Permission labels only · no account connection</small></div>
               <div class="tool-list" id="tool-list"></div>
-              <button class="connect-tool-button" id="add-tool-button"><span>+</span> Add a tool label</button>
+              <button class="connect-tool-button" id="add-tool-button" type="button"><span aria-hidden="true">+</span> Add a tool label</button>
             </article>
+          </section>
+
+          <section class="panel runs-panel" id="runs" aria-labelledby="runs-title">
+            <div class="panel-header">
+              <div><div class="panel-title-row"><h2 id="runs-title">Run history</h2><span class="live-tag"><i></i> PERSISTED</span></div><p class="panel-subtitle">Plan, assignments, approvals, usage, and timeline for every executive run</p></div>
+              <div class="runs-toolbar">
+                <span class="tool-count" id="run-count">0 runs</span>
+                <label class="sr-only" for="run-filter">Filter runs</label>
+                <select class="filter-button" id="run-filter">
+                  <option value="all">All runs</option>
+                  <option value="active">Active</option>
+                  <option value="done">Completed</option>
+                  <option value="failed">Failed</option>
+                  <option value="canceled">Canceled</option>
+                </select>
+              </div>
+            </div>
+            <div class="run-list" id="run-list"><div class="approval-empty">No runs yet. Give the executive a task above.</div></div>
           </section>
 
           <footer class="page-footer"><span>Agent Factory <span class="footer-dot">•</span> Local workspace</span><span id="sync-status">Connecting… <i class="sync-dot"></i></span></footer>
@@ -168,14 +205,15 @@
     </div>
 
     <dialog class="agent-dialog" id="agent-dialog" aria-labelledby="agent-dialog-title">
-      <form id="agent-form" method="dialog">
+      <form id="agent-form">
         <div class="dialog-head"><div><span class="dialog-kicker">DIGITAL EMPLOYEE</span><h2 id="agent-dialog-title">Create employee</h2><p>Define a specialist for your organization.</p></div><button type="button" class="dialog-close" data-close-dialog aria-label="Close">×</button></div>
         <input type="hidden" id="agent-id" />
+        <p class="agent-stats" id="agent-stats" hidden></p>
         <label class="field-label" for="agent-name">Employee name</label>
-        <input class="text-input" id="agent-name" name="name" placeholder="e.g. Maya Chen" required maxlength="48" />
+        <input class="text-input" id="agent-name" name="name" placeholder="e.g. Maya Chen" required maxlength="80" autocomplete="off" />
         <div class="form-row">
-          <div><label class="field-label" for="agent-role">Role</label><input class="text-input" id="agent-role" name="role" placeholder="e.g. Customer success" required maxlength="48" /></div>
-          <div><label class="field-label" for="agent-branch">Branch</label><select class="text-input" id="agent-branch" name="branch"><option>San Francisco</option><option>Berlin</option><option>Singapore</option><option>Remote</option></select></div>
+          <div><label class="field-label" for="agent-role">Role</label><input class="text-input" id="agent-role" name="role" placeholder="e.g. Customer success" required maxlength="120" /></div>
+          <div><label class="field-label" for="agent-branch">Branch</label><select class="text-input" id="agent-branch" name="branch"></select></div>
         </div>
         <div class="form-row">
           <div><label class="field-label" for="agent-manager">Reports to</label><select class="text-input" id="agent-manager" name="manager"></select></div>
@@ -193,13 +231,13 @@
     </dialog>
 
     <dialog class="agent-dialog tool-dialog" id="mcp-dialog" aria-labelledby="mcp-dialog-title">
-      <form id="mcp-form" method="dialog">
-        <div class="dialog-head"><div><span class="dialog-kicker">REMOTE MCP SERVER</span><h2 id="mcp-dialog-title">Add MCP server</h2><p>Register an HTTPS endpoint and explicitly allow tool names.</p></div><button type="button" class="dialog-close" data-close-dialog aria-label="Close">×</button></div>
+      <form id="mcp-form">
+        <div class="dialog-head"><div><span class="dialog-kicker">REMOTE MCP SERVER</span><h2 id="mcp-dialog-title">Add MCP server</h2><p>Register a public HTTPS endpoint and explicitly allow tool names.</p></div><button type="button" class="dialog-close" data-close-dialog aria-label="Close">×</button></div>
         <input type="hidden" id="mcp-connector-id" />
-        <label class="field-label" for="mcp-label">Display name</label><input class="text-input" id="mcp-label" name="label" maxlength="64" required placeholder="e.g. Internal project tracker" />
+        <label class="field-label" for="mcp-label">Display name</label><input class="text-input" id="mcp-label" name="label" maxlength="80" required placeholder="e.g. Internal project tracker" />
         <label class="field-label" for="mcp-url">HTTPS endpoint</label><input class="text-input" id="mcp-url" name="endpointUrl" type="url" required placeholder="https://mcp.example.com/mcp" />
-        <label class="field-label" for="mcp-description">Description</label><input class="text-input" id="mcp-description" name="description" maxlength="240" placeholder="What this server can do" />
-        <label class="field-label" for="mcp-tools">Allowed tool names</label><textarea class="text-input mcp-tool-input" id="mcp-tools" name="allowedTools" rows="3" required placeholder="search_projects\ncreate_issue"></textarea><p class="field-hint">Enter exact names, one per line. Tool discovery and OAuth are not included.</p>
+        <label class="field-label" for="mcp-description">Description</label><input class="text-input" id="mcp-description" name="description" maxlength="500" placeholder="What this server can do" />
+        <label class="field-label" for="mcp-tools">Allowed tool names</label><textarea class="text-input mcp-tool-input" id="mcp-tools" name="allowedTools" rows="3" required placeholder="search_projects&#10;create_issue"></textarea><p class="field-hint">Enter exact names, one per line. Tool discovery and OAuth are not included.</p>
         <label class="field-label" for="mcp-token">Bearer token <span class="optional-label">optional</span></label><input class="text-input" id="mcp-token" name="bearerToken" type="password" autocomplete="new-password" placeholder="Leave blank to keep the saved token" />
         <p class="mcp-warning form-warning">The token is sent only to this local server and cannot be read back. It is stored unencrypted in an owner-only local file. The server must be reachable from your model gateway.</p>
         <label class="mcp-enabled-option"><input id="mcp-enabled" type="checkbox" checked /> Enable connector for assigned employees</label>
@@ -208,16 +246,53 @@
     </dialog>
 
     <dialog class="agent-dialog tool-dialog" id="tool-dialog" aria-labelledby="tool-dialog-title">
-      <form id="tool-form" method="dialog">
+      <form id="tool-form">
         <div class="dialog-head"><div><span class="dialog-kicker">TOOL CATALOG</span><h2 id="tool-dialog-title">Add a tool label</h2><p>List a permission label for employee profiles.</p></div><button type="button" class="dialog-close" data-close-dialog aria-label="Close">×</button></div>
-        <label class="field-label" for="tool-name">Tool name</label><input class="text-input" id="tool-name" name="name" placeholder="e.g. Linear" maxlength="32" required />
-        <label class="field-label" for="tool-category">Category</label><select class="text-input" id="tool-category" name="category"><option>Project management</option><option>Communication</option><option>CRM</option><option>Data & analytics</option><option>Productivity</option></select>
-        <div class="simulated-note"><span>ⓘ</span> This adds metadata only. It does not connect an account or execute actions.</div>
+        <label class="field-label" for="tool-name">Tool name</label><input class="text-input" id="tool-name" name="name" placeholder="e.g. Linear" maxlength="80" required />
+        <label class="field-label" for="tool-category">Category</label><select class="text-input" id="tool-category" name="category"><option>Project management</option><option>Communication</option><option>CRM</option><option>Data & analytics</option><option>Productivity</option><option>Knowledge</option></select>
+        <div class="simulated-note"><span aria-hidden="true">ⓘ</span> This adds metadata only. It does not connect an account or execute actions.</div>
         <div class="dialog-actions"><button type="button" class="button button-quiet" data-close-dialog>Cancel</button><button type="submit" class="button button-primary">Add tool label</button></div>
       </form>
     </dialog>
 
+    <dialog class="agent-dialog usage-dialog" id="usage-dialog" aria-labelledby="usage-dialog-title">
+      <div class="dialog-head"><div><span class="dialog-kicker">MEASURED USAGE</span><h2 id="usage-dialog-title">Token usage report</h2><p>Provider-reported usage for runs, plus estimates when a gateway omits totals.</p></div><button type="button" class="dialog-close" data-close-dialog aria-label="Close">×</button></div>
+      <div class="usage-report" id="usage-report"></div>
+      <div class="dialog-actions"><button type="button" class="button button-quiet" data-close-dialog>Close</button><button type="button" class="button button-primary" id="backup-from-usage">Download backup</button></div>
+    </dialog>
+
+    <dialog class="agent-dialog help-dialog" id="help-dialog" aria-labelledby="help-dialog-title">
+      <div class="dialog-head"><div><span class="dialog-kicker">OPERATOR GUIDE</span><h2 id="help-dialog-title">Help & shortcuts</h2><p>How runs, approvals, and the local workspace fit together.</p></div><button type="button" class="dialog-close" data-close-dialog aria-label="Close">×</button></div>
+      <div class="help-body">
+        <h3>Keyboard</h3>
+        <dl class="shortcut-list">
+          <div><dt><kbd>Ctrl</kbd> / <kbd>⌘</kbd> + <kbd>K</kbd></dt><dd>Open the command palette</dd></div>
+          <div><dt><kbd>?</kbd></dt><dd>Open this help</dd></div>
+          <div><dt><kbd>Esc</kbd></dt><dd>Close a dialog or the palette</dd></div>
+        </dl>
+        <h3>How a run works</h3>
+        <ol class="help-list">
+          <li>The executive agent plans the task and picks up to three active employees.</li>
+          <li>Each employee returns a result; progress streams into the live run panel.</li>
+          <li>If an employee requests a granted MCP tool, the run pauses. The approval card shows the server, employee, exact tool name, and arguments.</li>
+          <li>Approving resumes the run; rejecting resumes it without contacting the remote server. Every external call still needs its own approval.</li>
+        </ol>
+        <h3>Local safety boundary</h3>
+        <p>There is no login, tenant isolation, or billing. The server binds to loopback and stores workspace state, pending approvals, and connector tokens in owner-only files under <code>data/</code>. Tokens are not encrypted. Do not place customer secrets in the workspace.</p>
+        <p>Demo mode (<code>AGENT_FACTORY_DEMO=1</code>) simulates every model and tool call, labels results as simulated, and never contacts a model or MCP server.</p>
+      </div>
+      <div class="dialog-actions"><button type="button" class="button button-primary" data-close-dialog>Got it</button></div>
+    </dialog>
+
+    <dialog class="palette-dialog" id="palette-dialog" aria-label="Command palette">
+      <div class="palette-search"><span aria-hidden="true">⌕</span><input id="palette-input" type="text" placeholder="Search employees, runs, actions…" autocomplete="off" spellcheck="false" aria-controls="palette-results" /></div>
+      <div class="palette-results" id="palette-results" role="listbox" aria-label="Commands"></div>
+      <div class="palette-foot"><span><kbd>↑</kbd><kbd>↓</kbd> navigate</span><span><kbd>↵</kbd> run</span><span><kbd>esc</kbd> close</span></div>
+    </dialog>
+
+    <input type="file" id="restore-file" accept="application/json,.json" hidden />
     <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
+    <noscript><p class="noscript">Agent Factory needs JavaScript for its local operator console.</p></noscript>
     <script src="app.js"></script>
   </body>
 </html>

@@ -1,0 +1,10 @@
+node_modules/
+.env
+*.log
+.DS_Store
+
+# Owner-only runtime data. The workspace itself is intentionally tracked in
+# this MVP so the seeded demo state ships with the repository.
+data/connector-secrets.json
+data/pending-approvals.json
+data/*.tmp

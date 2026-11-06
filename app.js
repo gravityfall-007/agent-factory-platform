@@ -1,17 +1,174 @@
 "use strict";
 
-const branches = ["San Francisco", "Berlin", "Singapore", "Remote"];
+/* ------------------------------------------------------------------ *
+ * Agent Factory operator console
+ * Same-origin API client, live run stream, approvals, and run history.
+ * ------------------------------------------------------------------ */
+
+const DEFAULT_BRANCHES = ["San Francisco", "Berlin", "Singapore", "Remote"];
+const RUN_EVENT_TYPES = [
+  "run.queued",
+  "run.started",
+  "run.recovered",
+  "run.snapshot",
+  "plan",
+  "assignment.started",
+  "assignment.completed",
+  "assignment.skipped",
+  "approval.required",
+  "approval.resolved",
+  "approval.completed",
+  "approval.error",
+  "run.waiting_approval",
+  "run.synthesizing",
+  "run.completed",
+  "run.failed",
+  "run.canceled",
+  "run.ended",
+];
+const RUN_STATUS = {
+  queued: "Queued",
+  running: "Running",
+  waiting_approval: "Waiting for approval",
+  done: "Completed",
+  failed: "Failed",
+  canceled: "Canceled",
+};
+const ASSIGNMENT_STATUS = {
+  pending: "Pending",
+  working: "Working",
+  awaiting_approval: "Awaiting approval",
+  done: "Done",
+  failed: "Failed",
+  skipped: "Skipped",
+};
+const ACTIVE_STATUSES = new Set(["queued", "running", "waiting_approval"]);
+
 let executive = { id: "exec", name: "Executive agent", role: "Executive agent · CEO", branch: "Executive", status: "active", tools: [] };
-let state = { executive, agents: [], tools: [], approvals: [], activities: [], tasks: [] };
-let gateway = { configured: false, model: "", format: "responses" };
+let state = {
+  executive,
+  agents: [],
+  tools: [],
+  approvals: [],
+  activities: [],
+  tasks: [],
+  connectors: [],
+  usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+};
+let gateway = { configured: false, mode: "unconfigured", model: null, budget: 100000 };
 let stateReady = false;
+let backendOutdated = false;
+let selectedBranch = "all";
+let activityFilter = "all";
+let showAllActivity = false;
+let runFilter = "all";
+const expandedRuns = new Set();
+let refreshPromise = null;
+let startInFlight = false;
+
+/** @type {null | {runId:string, source:EventSource|null, events:object[], status:string, plan:object|null, started:Set<string>, results:Map<string,string>, pendingApproval:object|null, terminal:boolean, timer:number|null, poll:number|null, startedAtMs:number, endedAtMs:number|null, connectionLost:boolean}} */
+let live = null;
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
-const initials = (name) => name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+const escapeHtml = (value) =>
+  String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+const initials = (name) =>
+  String(name || "")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0] || "")
+    .join("")
+    .toUpperCase();
+const newId = (prefix) => {
+  const random = globalThis.crypto?.randomUUID?.().replaceAll("-", "").slice(0, 10) || `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  return `${prefix}-${random}`;
+};
+
 const agentById = (id) => state.agents.find((agent) => agent.id === id);
-let showAllActivity = false;
+const isActiveStatus = (status) => ACTIVE_STATUSES.has(status);
+const branchMeta = { "San Francisco": "sf", Berlin: "berlin", Singapore: "singapore", Remote: "remote" };
+const branchClass = (branch) => {
+  if (branchMeta[branch]) return branchMeta[branch];
+  return `branch-${String(branch || "other").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "other"}`;
+};
+
+function allBranches() {
+  const set = new Set(DEFAULT_BRANCHES);
+  for (const agent of state.agents) if (agent.branch) set.add(agent.branch);
+  return [...set];
+}
+
+function richText(value) {
+  return escapeHtml(value)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>");
+}
+
+function formatDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
+}
+
+function formatFullDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
+function timeAgo(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const seconds = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+  if (seconds < 45) return "just now";
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
+  if (seconds < 86_400) return `${Math.round(seconds / 3600)}h ago`;
+  if (seconds < 7 * 86_400) return `${Math.round(seconds / 86_400)}d ago`;
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(date);
+}
+
+function formatDuration(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${Math.max(1, seconds)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  if (minutes < 60) return `${minutes}m ${String(rest).padStart(2, "0")}s`;
+  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
+}
+
+function formatTokens(value) {
+  const number = Number(value) || 0;
+  if (number >= 1_000_000) return `${(number / 1_000_000).toFixed(number >= 10_000_000 ? 0 : 1)}M`;
+  if (number >= 10_000) return `${(number / 1000).toFixed(1)}k`;
+  return number.toLocaleString("en-US");
+}
+
+function plural(count, singular, pluralWord = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : pluralWord}`;
+}
+
+function taskFor(runId) {
+  return state.tasks.find((task) => task.id === runId);
+}
+
+const runStatusLabel = (status) => RUN_STATUS[status] || status || "Unknown";
+const runStatusClass = (status) => (status === "waiting_approval" ? "waiting" : status || "queued");
+const statusBadge = (status) => `<span class="run-status ${escapeHtml(runStatusClass(status))}">${escapeHtml(runStatusLabel(status))}</span>`;
+
+function agentStats(agentId) {
+  const assigned = state.tasks.filter((task) => (task.assignments || []).some((assignment) => assignment.employeeId === agentId));
+  const completed = assigned.filter((task) => (task.assignments || []).some((assignment) => assignment.employeeId === agentId && assignment.status === "done"));
+  const tokens = assigned.reduce(
+    (sum, task) =>
+      sum +
+      (task.assignments || [])
+        .filter((assignment) => assignment.employeeId === agentId)
+        .reduce((inner, assignment) => inner + (assignment.usage?.totalTokens || 0), 0),
+    0,
+  );
+  return { runs: assigned.length, completed: completed.length, tokens, last: assigned[0]?.createdAt || null };
+}
 
 async function apiRequest(path, options = {}) {
   const headers = { Accept: "application/json", ...(options.headers || {}) };
@@ -23,54 +180,682 @@ async function apiRequest(path, options = {}) {
     throw new Error("The Agent Factory server is unavailable. Start it with `node server.mjs`.");
   }
   let payload = {};
-  try { payload = await response.json(); } catch { /* keep a safe, generic error below */ }
+  try {
+    payload = await response.json();
+  } catch {
+    /* handled below */
+  }
   if (!response.ok) throw new Error(payload.error || payload.message || `Request failed (${response.status})`);
   return payload;
 }
 
-function setGatewayStatus(message, mode = "offline") {
-  const badge = $("#gateway-status");
-  badge.classList.remove("ready", "offline", "pending");
-  badge.classList.add(mode);
-  badge.innerHTML = `<span class="demo-pulse"></span> ${escapeHtml(message)}`;
-  $("#run-task-button").disabled = !stateReady || !gateway.configured;
-  $("#task-message").textContent = !stateReady
-    ? "Waiting for the local server and workspace…"
-    : gateway.configured
-      ? `Model gateway ready · ${gateway.model}. Tool entries are permission labels only.`
-      : "Model gateway is not configured. Set OPENAI_BASE_URL, OPENAI_API_KEY, and AGENT_FACTORY_MODEL on the server, then restart it.";
+function toast(message, error = false) {
+  const node = document.createElement("div");
+  node.className = `toast${error ? " error" : ""}`;
+  node.textContent = message;
+  $("#toast-region").append(node);
+  window.setTimeout(() => node.remove(), 3800);
 }
 
-async function refreshWorkspace() {
-  try {
-    const [status, workspace] = await Promise.all([apiRequest("/api/status"), apiRequest("/api/state")]);
-    gateway = status;
-    executive = workspace.executive;
-    state = workspace;
-    stateReady = true;
-    render();
-    setGatewayStatus(gateway.configured ? `MODEL READY · ${gateway.model}` : "MODEL GATEWAY NOT CONFIGURED", gateway.configured ? "ready" : "offline");
-    $("#sync-status").textContent = "Workspace loaded";
-    return true;
-  } catch (error) {
-    stateReady = false;
-    gateway = { configured: false, model: "", format: "responses" };
-    setGatewayStatus("LOCAL SERVER UNAVAILABLE", "offline");
-    $("#sync-status").textContent = "Workspace not loaded";
-    $("#task-message").textContent = error.message;
-    render();
-    return false;
+function setSync(text) {
+  $("#sync-status").innerHTML = `${escapeHtml(text)} <i class="sync-dot"></i>`;
+}
+
+function setTaskMessage(text) {
+  $("#task-message").textContent = text;
+}
+
+/* ----------------------------- gateway ----------------------------- */
+
+function updateGatewayChrome() {
+  const badge = $("#gateway-status");
+  if (!badge) return;
+  badge.classList.remove("ready", "offline", "pending", "demo");
+  const runButton = $("#run-task-button");
+  if (!stateReady) {
+    badge.classList.add("pending");
+    badge.innerHTML = '<span class="demo-pulse"></span> CONNECTING TO LOCAL SERVER';
+    runButton.disabled = true;
+  } else if (backendOutdated) {
+    badge.classList.add("offline");
+    badge.innerHTML = '<span class="demo-pulse"></span> RESTART SERVER · OLD BACKEND';
+    badge.title = "The UI is newer than the running server. Restart node server.mjs to enable live runs, usage, backups, and resets.";
+    runButton.disabled = true;
+  } else if (!gateway.configured) {
+    badge.classList.add("offline");
+    badge.innerHTML = '<span class="demo-pulse"></span> MODEL GATEWAY NOT CONFIGURED';
+    runButton.disabled = true;
+  } else if (gateway.mode === "demo") {
+    badge.classList.add("ready", "demo");
+    badge.innerHTML = `<span class="demo-pulse"></span> DEMO MODE · ${escapeHtml(gateway.model || "simulated")}`;
+    badge.title = "Demo mode simulates every model and tool call. No external system is contacted.";
+    runButton.disabled = false;
+  } else {
+    badge.classList.add("ready");
+    badge.innerHTML = `<span class="demo-pulse"></span> MODEL READY · ${escapeHtml(gateway.model || "gateway")}`;
+    badge.title = "Live model gateway configured. External MCP calls still require approval.";
+    runButton.disabled = false;
+  }
+  if (startInFlight) runButton.disabled = true;
+  if (!stateReady) {
+    setTaskMessage("Waiting for the local server and workspace…");
+  } else if (backendOutdated) {
+    setTaskMessage("The running server is an older build. Stop it and start `node server.mjs` again to enable live runs, measured usage, approval streaming, backups, and resets.");
+  } else if (!gateway.configured) {
+    setTaskMessage("Model gateway is not configured. Set OPENAI_BASE_URL, OPENAI_API_KEY, and AGENT_FACTORY_MODEL, or start with AGENT_FACTORY_DEMO=1.");
+  } else if (!live) {
+    setTaskMessage(
+      gateway.mode === "demo"
+        ? "Demo mode: plans, results, and usage are simulated. No external model or tool is contacted."
+        : `Model gateway ready · ${gateway.model}. Tool entries are permission labels only.`,
+    );
   }
 }
 
+/* ------------------------------ boot ------------------------------- */
+
+async function refreshWorkspace({ quiet = false } = {}) {
+  if (refreshPromise) return refreshPromise;
+  refreshPromise = (async () => {
+    try {
+      const [status, workspace, active] = await Promise.all([
+        apiRequest("/api/status"),
+        apiRequest("/api/state"),
+        apiRequest("/api/runs/active").catch(() => ({ runs: [] })),
+      ]);
+      gateway = status;
+      backendOutdated = status.mode === undefined;
+      state = workspace;
+      executive = workspace.executive;
+      stateReady = true;
+      render();
+      updateGatewayChrome();
+      setSync(quiet ? "Synced" : "Workspace loaded");
+      if (!live && active.runs.length) attachRun(pickActiveRun(active.runs).runId);
+      return true;
+    } catch (error) {
+      stateReady = false;
+      gateway = { configured: false, mode: "unconfigured", model: null, budget: 100000 };
+      updateGatewayChrome();
+      setSync("Workspace not loaded");
+      setTaskMessage(error.message);
+      render();
+      if (!quiet) toast(`Workspace could not load. ${error.message}`, true);
+      return false;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+  return refreshPromise;
+}
+
+function pickActiveRun(runs) {
+  const order = { running: 0, waiting_approval: 1, queued: 2 };
+  return [...runs].sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9))[0];
+}
+
+/* ----------------------------- render ------------------------------ */
+
+function render() {
+  renderBranchList();
+  renderOrgChart();
+  renderApprovals();
+  renderActivity();
+  renderTasks();
+  renderRuns();
+  renderTools();
+  renderConnectors();
+  renderMetrics();
+  renderLive();
+}
+
+function renderBranchList() {
+  const branches = allBranches();
+  if (selectedBranch !== "all" && !branches.includes(selectedBranch)) selectedBranch = "all";
+  const rows = [
+    `<a href="#employees" class="branch-item ${selectedBranch === "all" ? "selected" : ""}" data-branch="all"><span class="branch-dot all-dot" aria-hidden="true">✳</span>All branches <span class="branch-count">${state.agents.length}</span></a>`,
+    ...branches.map((branch) => {
+      const count = state.agents.filter((agent) => agent.branch === branch).length;
+      return `<a href="#employees" class="branch-item ${selectedBranch === branch ? "selected" : ""}" data-branch="${escapeHtml(branch)}"><span class="branch-dot ${escapeHtml(branchClass(branch))}" aria-hidden="true"></span>${escapeHtml(branch)} <span class="branch-count">${count}</span></a>`;
+    }),
+  ];
+  $("#branch-list").innerHTML = rows.join("");
+}
+
+function renderOrgChart() {
+  const branches = allBranches();
+  const visibleBranches = selectedBranch === "all" ? branches : branches.filter((branch) => branch === selectedBranch);
+  const executiveTools = executive.tools.filter((name) => state.tools.some((tool) => tool.name === name && tool.connected)).length;
+  const branchCards = visibleBranches
+    .map((branch) => {
+      const agents = state.agents.filter((agent) => agent.branch === branch);
+      const renderAgentNode = (agent, nested, seen) => {
+        if (seen.has(agent.id)) return "";
+        const nextSeen = new Set(seen).add(agent.id);
+        const manager = agent.managerId === "exec" ? executive.name : agentById(agent.managerId)?.name || executive.name;
+        const children = agents.filter((child) => child.managerId === agent.id);
+        const stats = agentStats(agent.id);
+        const row = `<div class="branch-agent">
+          <span class="agent-avatar" aria-hidden="true">${escapeHtml(initials(agent.name))}</span>
+          <span class="agent-info"><span class="agent-name">${escapeHtml(agent.name)}</span><span class="agent-role">${escapeHtml(agent.role)} · reports to ${escapeHtml(manager)}</span><span class="agent-capabilities">${escapeHtml(agent.capabilities.join(", ") || "No capabilities listed")}${stats.runs ? ` · ${plural(stats.runs, "run")}` : ""}</span></span>
+          <span class="agent-status" aria-label="${agent.status === "active" ? "Active" : "Idle"}">${agent.status === "active" ? "Active" : "Idle"}</span>
+          <button class="agent-edit" type="button" data-edit-agent="${escapeHtml(agent.id)}" aria-label="Edit ${escapeHtml(agent.name)}" title="Edit employee">✎</button>
+        </div>`;
+        return `${nested ? `<div class="agent-children">${row}</div>` : row}${children.map((child) => renderAgentNode(child, true, nextSeen)).join("")}`;
+      };
+      const roots = agents.filter((agent) => agent.managerId === "exec" || !agents.some((candidate) => candidate.id === agent.managerId));
+      return `<section class="branch-card" aria-label="${escapeHtml(branch)} branch">
+        <div class="branch-card-head"><span class="branch-dot ${escapeHtml(branchClass(branch))}" aria-hidden="true"></span>${escapeHtml(branch)}<small>${plural(agents.length, "EMPLOYEE")}</small></div>
+        ${agents.length ? roots.map((agent) => renderAgentNode(agent, false, new Set())).join("") : `<div class="empty-branch">No employees in this branch yet.</div>`}
+      </section>`;
+    })
+    .join("");
+  $("#org-chart").innerHTML = `<article class="ceo-card">
+      <span class="agent-avatar ceo" aria-hidden="true">${escapeHtml(initials(executive.name))}</span>
+      <span class="agent-info"><span class="agent-name-row"><span class="agent-name">${escapeHtml(executive.name)}</span><span class="ceo-label">EXECUTIVE</span></span><span class="agent-role">${escapeHtml(executive.role)} · coordinates all branches</span></span>
+      <span class="agent-status">${executiveTools} labels</span>
+    </article><div class="org-branches">${branchCards}</div>`;
+}
+
+function renderApprovals() {
+  const approvals = state.approvals || [];
+  const reviewApprovals = approvals.filter((item) => !item.mcp);
+  const mcpApprovals = approvals.filter((item) => item.mcp);
+  const list = $("#approval-list");
+  if (!stateReady) {
+    list.innerHTML = '<div class="approval-empty">Connect to the local server to load approval history.</div>';
+  } else if (!reviewApprovals.length) {
+    list.innerHTML = '<div class="approval-empty">No review examples are waiting.</div>';
+  } else {
+    list.innerHTML = reviewApprovals
+      .map(
+        (approval) => `<article class="approval-card">
+        <div class="approval-meta"><span class="approval-avatar">${escapeHtml(approval.initials || initials(approval.agent))}</span><strong>${escapeHtml(approval.agent)}</strong><span>requested review</span><span class="approval-time">${escapeHtml(approval.time || timeAgo(approval.createdAt))}</span></div>
+        <p class="approval-title">${escapeHtml(approval.action)}</p><p class="approval-desc">${escapeHtml(approval.detail)}</p>
+        <div class="approval-actions"><button class="small-action approve" type="button" data-approval="${escapeHtml(approval.id)}" data-decision="approved">Approve</button><button class="small-action" type="button" data-approval="${escapeHtml(approval.id)}" data-decision="rejected">Reject</button></div>
+      </article>`,
+      )
+      .join("");
+  }
+  $("#mcp-pending-list").innerHTML = mcpApprovals
+    .map((approval) => {
+      const call = approval.mcp;
+      const run = taskFor(call.runId);
+      return `<article class="mcp-approval-card" data-approval-card="${escapeHtml(approval.id)}">
+        <div class="mcp-approval-meta"><span class="mcp-mark">MCP</span><div><strong>${escapeHtml(call.connectorLabel || "Remote MCP server")}</strong><small>${escapeHtml(approval.agent)} · ${escapeHtml(call.toolName)}${run ? ` · run ${escapeHtml(run.id.slice(-6))}` : ""}</small></div></div>
+        <p class="mcp-approval-warning">Approving sends these exact arguments to the remote server and may trigger an external action. Rejecting resumes the run without contacting it.</p>
+        <pre class="mcp-arguments">${escapeHtml(JSON.stringify(call.arguments || {}, null, 2))}</pre>
+        <div class="approval-actions">
+          <button class="small-action approve" type="button" data-mcp-approval="${escapeHtml(approval.id)}" data-decision="approved">Approve this call</button>
+          <button class="small-action" type="button" data-mcp-approval="${escapeHtml(approval.id)}" data-decision="rejected">Reject</button>
+          ${call.runId ? `<button class="small-action" type="button" data-open-run="${escapeHtml(call.runId)}">Open run</button>` : ""}
+        </div>
+      </article>`;
+    })
+    .join("");
+  const count = approvals.length;
+  $("#approval-count-badge").textContent = count;
+  $("#approval-nav-count").textContent = count;
+  $("#approval-nav-count").classList.toggle("attention", count > 0);
+  $("#pending-approvals-metric").textContent = count ? String(count).padStart(2, "0") : "0";
+  const employees = new Set(approvals.map((approval) => approval.agent)).size;
+  $("#approval-employee-count").textContent = `across ${plural(employees, "employee")}`;
+}
+
+function renderActivity() {
+  const filtered = (state.activities || []).filter((event) => {
+    if (activityFilter === "all") return true;
+    if (activityFilter === "runs") return event.kind === "complete" || event.kind === "reject";
+    if (activityFilter === "approvals") return event.kind === "approval";
+    if (activityFilter === "tools") return event.kind === "tool";
+    return true;
+  });
+  const events = showAllActivity ? filtered : filtered.slice(0, 6);
+  const host = $("#activity-feed");
+  if (!stateReady) {
+    host.innerHTML = '<div class="approval-empty">Workspace history is unavailable while the local server is offline.</div>';
+  } else if (!filtered.length) {
+    host.innerHTML = '<div class="approval-empty">No activity matches this filter yet.</div>';
+  } else {
+    host.innerHTML = events
+      .map(
+        (event) => `<article class="activity-item">
+        <span class="activity-icon ${escapeHtml(event.kind)}" aria-hidden="true">${escapeHtml(event.icon)}</span>
+        <span class="activity-copy"><strong>${escapeHtml(event.agent)}</strong> ${escapeHtml(event.action)} <strong>${escapeHtml(event.target)}</strong><small>${escapeHtml(event.detail)}</small></span>
+        <time class="activity-time">${escapeHtml(event.time || "")}</time>
+      </article>`,
+      )
+      .join("");
+  }
+  const footer = $("#load-activity");
+  footer.hidden = filtered.length <= 6;
+  footer.textContent = showAllActivity ? "Show recent activity ↑" : `View all ${filtered.length} events →`;
+}
+
+function renderTasks() {
+  const host = $("#task-results");
+  const tasks = state.tasks || [];
+  if (!stateReady) {
+    host.innerHTML = '<div class="task-empty">Start the local server to load saved task runs.</div>';
+    return;
+  }
+  if (!tasks.length) {
+    host.innerHTML = '<div class="task-empty">Completed and failed task runs will be saved here and in run history.</div>';
+    return;
+  }
+  host.innerHTML = tasks.slice(0, 1).map((task) => taskCard(task, true)).join("");
+}
+
+function taskCard(task, compact = false) {
+  const summary = task.summary
+    ? `<p class="task-summary">${richText(task.summary)}</p>`
+    : `<p class="task-summary">${task.status === "failed" ? escapeHtml(task.error || "The run failed. Check the gateway configuration and try again.") : task.status === "waiting_approval" ? "Paused until the requested MCP call is approved or rejected." : "No executive summary was returned."}</p>`;
+  return `<article class="task-result ${escapeHtml(runStatusClass(task.status))}">
+    <div class="task-result-head"><div><span class="task-result-label">${escapeHtml(task.status === "done" ? "EXECUTIVE SUMMARY" : runStatusLabel(task.status).toUpperCase())}</span><h3>${escapeHtml(task.prompt)}</h3></div><time>${escapeHtml(formatDate(task.createdAt))}</time></div>
+    ${summary}
+    ${compact
+      ? `<div class="task-result-actions"><span>${task.assignments?.length ? `${plural(task.assignments.length, "employee")} · ${formatTokens(task.usage?.totalTokens || 0)} tokens` : "No assignments"}</span><button type="button" data-open-run="${escapeHtml(task.id)}">Open full run →</button></div>`
+      : task.assignments?.length
+        ? `<div class="assignment-list">${task.assignments.map((assignment) => `<div class="assignment-result"><div><strong>${escapeHtml(assignment.employeeName)}</strong><small>${escapeHtml(assignment.task)}</small></div><p>${escapeHtml(assignment.result || "No result returned.")}</p></div>`).join("")}</div>`
+        : ""}
+  </article>`;
+}
+
+function renderRuns() {
+  const host = $("#run-list");
+  if (!stateReady) {
+    host.innerHTML = '<div class="approval-empty">Connect to the local server to load run history.</div>';
+    return;
+  }
+  const all = state.tasks || [];
+  const filtered = all.filter((task) => {
+    if (runFilter === "all") return true;
+    if (runFilter === "active") return isActiveStatus(task.status);
+    return task.status === runFilter;
+  });
+  $("#run-count").textContent = runFilter === "all" ? plural(all.length, "run") : `${filtered.length} of ${plural(all.length, "run")}`;
+  if (!filtered.length) {
+    host.innerHTML = `<div class="approval-empty">${all.length ? "No runs match this filter." : "No runs yet. Give the executive a task above."}</div>`;
+    return;
+  }
+  host.innerHTML = filtered.map(runCard).join("");
+}
+
+function runCard(task) {
+  const expanded = expandedRuns.has(task.id);
+  const active = isActiveStatus(task.status);
+  const approval = (state.approvals || []).find((item) => item.mcp?.runId === task.id);
+  const usage = task.usage?.totalTokens || 0;
+  const duration = task.completedAt ? formatDuration(new Date(task.completedAt) - new Date(task.createdAt)) : null;
+  const meta = [
+    formatFullDate(task.createdAt),
+    duration ? `took ${duration}` : active ? "in progress" : null,
+    usage ? `${formatTokens(usage)} tokens` : null,
+    task.assignments?.length ? plural(task.assignments.length, "employee") : null,
+  ].filter(Boolean);
+  const actions = [
+    active ? `<button class="small-action" type="button" data-attach-run="${escapeHtml(task.id)}">View live</button>` : "",
+    active ? `<button class="small-action" type="button" data-cancel-run="${escapeHtml(task.id)}">Cancel</button>` : "",
+    !active ? `<button class="small-action" type="button" data-rerun="${escapeHtml(task.id)}">Re-run</button>` : "",
+    `<button class="small-action" type="button" data-toggle-run="${escapeHtml(task.id)}" aria-expanded="${expanded}">${expanded ? "Hide details" : "Details"}</button>`,
+    !active ? `<button class="small-action danger-link" type="button" data-delete-run="${escapeHtml(task.id)}">Delete</button>` : "",
+  ].join("");
+  const assignments = (task.assignments || [])
+    .map(
+      (assignment) => `<div class="run-assignment">
+        <div class="run-assignment-head"><strong>${escapeHtml(assignment.employeeName)}</strong><span class="assignment-status ${escapeHtml(assignment.status)}">${escapeHtml(ASSIGNMENT_STATUS[assignment.status] || assignment.status)}</span>${assignment.usage?.totalTokens ? `<small>${formatTokens(assignment.usage.totalTokens)} tokens</small>` : ""}</div>
+        <p class="run-assignment-task">${escapeHtml(assignment.task)}</p>
+        ${assignment.result ? `<div class="run-assignment-result">${richText(assignment.result)}</div>` : assignment.error ? `<p class="inline-error">${escapeHtml(assignment.error)}</p>` : `<p class="run-assignment-waiting">No result yet.</p>`}
+      </div>`,
+    )
+    .join("");
+  const timeline = (task.log || [])
+    .slice(-18)
+    .map((entry) => `<li><time>${escapeHtml(new Date(entry.at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }))}</time><span>${escapeHtml(entry.message)}</span></li>`)
+    .join("");
+  return `<article class="run-card ${escapeHtml(runStatusClass(task.status))}">
+    <div class="run-card-head">
+      <div class="run-card-title">${statusBadge(task.status)}<h3>${escapeHtml(task.prompt)}</h3><p class="run-meta">${escapeHtml(meta.join(" · "))}</p></div>
+      <div class="run-card-actions">${actions}</div>
+    </div>
+    ${expanded
+      ? `<div class="run-details">
+          ${task.summary ? `<div class="run-summary">${richText(task.summary)}</div>` : ""}
+          ${approval ? `<div class="run-approval-note">Paused for approval: <strong>${escapeHtml(approval.mcp.toolName)}</strong> on ${escapeHtml(approval.mcp.connectorLabel)}. Open <a href="#approvals">Approvals</a> to review the exact arguments.</div>` : ""}
+          ${assignments ? `<div class="run-assignments">${assignments}</div>` : '<p class="run-assignment-waiting">No assignments yet.</p>'}
+          ${timeline ? `<details class="run-timeline"><summary>Timeline (${(task.log || []).length} events)</summary><ol>${timeline}</ol></details>` : ""}
+          <div class="run-footnote">Run ID <code>${escapeHtml(task.id)}</code>${task.model ? ` · model <code>${escapeHtml(task.model)}</code>` : ""}${task.error && task.error !== "failed" && task.error !== "canceled" ? ` · error <code>${escapeHtml(task.error)}</code>` : ""}</div>
+        </div>`
+      : ""}
+  </article>`;
+}
+
+function renderTools() {
+  const enabled = state.tools.filter((tool) => tool.connected).length;
+  $("#tool-count").textContent = plural(enabled, "label");
+  $("#tool-list").innerHTML = state.tools
+    .map(
+      (tool, index) => `<div class="tool-row">
+      <span class="tool-logo ${escapeHtml(tool.style)}" aria-hidden="true">${escapeHtml(tool.glyph)}</span>
+      <span class="tool-copy"><strong>${escapeHtml(tool.name)}</strong><small>${escapeHtml(tool.category)} · not connected</small></span>
+      <span class="tool-state ${tool.connected ? "" : "off"}">${tool.connected ? "Listed" : "Disabled"}</span>
+      <button class="toggle" type="button" role="switch" aria-checked="${tool.connected}" aria-label="${tool.connected ? "Disable" : "Enable"} ${escapeHtml(tool.name)} permission label; not connected" data-toggle-tool="${index}"></button>
+    </div>`,
+    )
+    .join("");
+}
+
+function renderConnectors() {
+  const host = $("#mcp-connector-list");
+  const connectors = state.connectors || [];
+  if (!stateReady) {
+    host.innerHTML = '<div class="approval-empty">Connector settings require the local server.</div>';
+    return;
+  }
+  if (!connectors.length) {
+    host.innerHTML = '<div class="approval-empty">No MCP servers configured. Add one to make explicitly granted tools available.</div>';
+    return;
+  }
+  host.innerHTML = connectors
+    .map(
+      (connector) => `<article class="mcp-connector-card ${connector.enabled ? "" : "disabled"}">
+      <div class="mcp-connector-heading"><span class="mcp-mark">MCP</span><div><strong>${escapeHtml(connector.label)}</strong><small>${escapeHtml(connector.url)}</small></div><span class="connector-badge">${connector.enabled ? "ENABLED" : "DISABLED"}</span></div>
+      <p>${escapeHtml(connector.description || "No description")}</p><div class="connector-tools">${(connector.allowedTools || []).map((tool) => `<span>${escapeHtml(tool)}</span>`).join("")}</div>
+      <small class="token-state">${connector.hasBearerToken ? "Server-held bearer token saved" : "No bearer token saved"}</small>
+      <div class="connector-actions"><button type="button" data-edit-connector="${escapeHtml(connector.id)}">Edit</button><button type="button" data-toggle-connector="${escapeHtml(connector.id)}">${connector.enabled ? "Disable" : "Enable"}</button><button type="button" class="danger-link" data-delete-connector="${escapeHtml(connector.id)}">Remove</button></div>
+    </article>`,
+    )
+    .join("");
+}
+
+function renderMetrics() {
+  if (!stateReady) {
+    $("#active-agents-metric").textContent = "—";
+    $("#agent-nav-count").textContent = "—";
+    return;
+  }
+  const active = state.agents.filter((agent) => agent.status === "active").length + (executive.status === "active" ? 1 : 0);
+  $("#active-agents-metric").innerHTML = `${active}<span class="metric-total"> / ${state.agents.length + 1}</span>`;
+  $("#active-agents-foot").textContent = `${plural(state.agents.length, "employee")} + executive`;
+  $("#agent-nav-count").textContent = state.agents.length;
+
+  const completed = state.tasks.filter((task) => task.status === "done");
+  const stopped = state.tasks.filter((task) => task.status === "failed" || task.status === "canceled");
+  const recent = completed.filter((task) => Date.now() - new Date(task.createdAt).getTime() < 7 * 86_400_000).length;
+  $("#completed-runs-metric").textContent = completed.length.toLocaleString("en-US");
+  $("#completed-runs-foot").textContent = `${recent} in last 7 days${stopped.length ? ` · ${stopped.length} stopped` : ""}`;
+
+  const budget = gateway.budget || 100000;
+  const used = state.usage?.totalTokens || 0;
+  const percent = budget > 0 ? Math.min(100, Math.round((used / budget) * 100)) : 0;
+  $("#tokens-metric").innerHTML = `${formatTokens(used)}<span class="metric-total"> tokens</span>`;
+  $("#tokens-foot").textContent = `${percent}% of ${formatTokens(budget)} budget`;
+  $("#tokens-foot").classList.toggle("budget-warning", percent >= 80);
+  $("#usage-percent").textContent = `${percent}%`;
+  $("#usage-fill").style.width = `${percent}%`;
+  $("#usage-track").setAttribute("aria-valuenow", String(percent));
+  $("#usage-card").classList.toggle("over-budget", percent >= 80);
+  $("#usage-copy").textContent = `${used.toLocaleString("en-US")} of ${budget.toLocaleString("en-US")} tokens · ${plural(state.tasks.length, "run")}`;
+  $("#runs-nav-count").textContent = state.tasks.length;
+  $("#notification-button").classList.toggle("has-pending", state.approvals.length > 0);
+}
+
+/* --------------------------- live stream --------------------------- */
+
+function pickLiveStatus(eventType, fallback) {
+  if (eventType === "run.queued") return "queued";
+  if (eventType === "approval.required" || eventType === "run.waiting_approval") return "waiting_approval";
+  if (eventType === "run.completed") return "done";
+  if (eventType === "run.failed") return "failed";
+  if (eventType === "run.canceled") return "canceled";
+  if (["run.started", "plan", "assignment.started", "assignment.completed", "approval.resolved", "approval.completed", "run.synthesizing"].includes(eventType)) return "running";
+  return fallback;
+}
+
+function attachRun(runId) {
+  if (!runId) return;
+  if (live?.runId === runId && live.source) {
+    renderLive();
+    return;
+  }
+  detachRun();
+  const task = taskFor(runId);
+  live = {
+    runId,
+    source: null,
+    events: [],
+    status: task?.status || "queued",
+    plan: null,
+    started: new Set(),
+    results: new Map(),
+    pendingApproval: null,
+    terminal: false,
+    timer: null,
+    poll: null,
+    startedAtMs: task ? new Date(task.createdAt).getTime() : Date.now(),
+    endedAtMs: null,
+    connectionLost: false,
+  };
+  if (task && !isActiveStatus(task.status)) {
+    live.terminal = true;
+    live.endedAtMs = task.completedAt ? new Date(task.completedAt).getTime() : Date.now();
+  }
+  renderLive();
+  startLiveClock();
+  if (live.terminal) {
+    scheduleRefresh();
+    return;
+  }
+  const source = new EventSource(`/api/runs/${encodeURIComponent(runId)}/events`);
+  live.source = source;
+  for (const type of RUN_EVENT_TYPES) {
+    source.addEventListener(type, (event) => {
+      if (!live || live.runId !== runId) return;
+      let payload;
+      try {
+        payload = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      handleRunEvent(type, payload);
+    });
+  }
+  source.onerror = () => {
+    if (!live || live.runId !== runId) return;
+    if (live.terminal) return;
+    live.connectionLost = true;
+    renderLive();
+  };
+  live.poll = window.setInterval(async () => {
+    if (!live || live.terminal) return;
+    await refreshWorkspace({ quiet: true });
+    if (!live || live.terminal) return;
+    const current = taskFor(runId);
+    if (current && !isActiveStatus(current.status)) {
+      live.status = current.status;
+      live.terminal = true;
+      live.endedAtMs = current.completedAt ? new Date(current.completedAt).getTime() : Date.now();
+      stopLivePolling();
+      renderLive();
+    }
+  }, 4000);
+}
+
+function detachRun() {
+  if (!live) return;
+  if (live.source) live.source.close();
+  if (live.timer) window.clearInterval(live.timer);
+  if (live.poll) window.clearInterval(live.poll);
+  live = null;
+}
+
+function stopLivePolling() {
+  if (!live) return;
+  if (live.poll) window.clearInterval(live.poll);
+  live.poll = null;
+  if (live.source) {
+    live.source.close();
+    live.source = null;
+  }
+}
+
+function handleRunEvent(type, payload) {
+  if (!live) return;
+  live.connectionLost = false;
+  live.events.push(payload);
+  live.status = pickLiveStatus(type, live.status);
+  const data = payload.data || {};
+  if (type === "run.snapshot" && data.task) {
+    live.status = data.task.status;
+    if (!isActiveStatus(data.task.status)) {
+      live.terminal = true;
+      live.endedAtMs = Date.now();
+    }
+  }
+  if (type === "run.recovered" && data.status) live.status = data.status;
+  if (type === "plan") live.plan = data;
+  if (type === "assignment.started") live.started.add(data.employeeId);
+  if (type === "assignment.completed") {
+    live.started.add(data.employeeId);
+    live.results.set(data.employeeId, data.result || "");
+  }
+  if (type === "approval.required") {
+    live.pendingApproval = data;
+    toast(`${data.employeeName} requested ${data.toolName}. Review the exact arguments in Approvals.`);
+  }
+  if (type === "approval.error") toast(`Approval failed. ${data.message || ""}`, true);
+  if (["run.completed", "run.failed", "run.canceled"].includes(type)) {
+    live.terminal = true;
+    live.endedAtMs = Date.now();
+    stopLivePolling();
+    if (type === "run.completed") {
+      toast("Run completed. Results are saved in run history.");
+      setTaskMessage("Run completed. The executive summary and measured usage are saved in run history.");
+    }
+    if (type === "run.failed") {
+      toast(`Run failed. ${data.message || ""}`, true);
+      setTaskMessage(`Run failed: ${data.message || "check the gateway and run history"}`);
+    }
+    if (type === "run.canceled") {
+      toast("Run canceled.");
+      setTaskMessage("Run canceled. Partial results are saved in run history.");
+    }
+  }
+  if (type === "run.ended") {
+    live.terminal = true;
+    stopLivePolling();
+    live.endedAtMs ||= Date.now();
+  }
+  renderLive();
+  scheduleRefresh();
+}
+
+let refreshTimer = null;
+function scheduleRefresh() {
+  if (refreshTimer) return;
+  refreshTimer = window.setTimeout(async () => {
+    refreshTimer = null;
+    await refreshWorkspace({ quiet: true });
+    renderLive();
+  }, 280);
+}
+
+function startLiveClock() {
+  if (!live) return;
+  if (live.timer) window.clearInterval(live.timer);
+  live.timer = window.setInterval(updateLiveClock, 1000);
+  updateLiveClock();
+}
+
+function updateLiveClock() {
+  if (!live) return;
+  const node = $("#live-elapsed");
+  if (!node) return;
+  const end = live.endedAtMs || Date.now();
+  node.textContent = formatDuration(end - live.startedAtMs);
+}
+
+function renderLive() {
+  const host = $("#live-run");
+  if (!live) {
+    host.hidden = true;
+    host.innerHTML = "";
+    return;
+  }
+  host.hidden = false;
+  const task = taskFor(live.runId);
+  const status = live.status || task?.status || "queued";
+  const assignments = task?.assignments?.length ? task.assignments : live.plan?.assignments || [];
+  const approval = live.pendingApproval || (state.approvals || []).find((item) => item.mcp?.runId === live.runId);
+  const planSummary = live.plan?.summary || "";
+  const planningDone = Boolean(live.plan) || assignments.length > 0;
+  const allAssignmentsDone = assignments.length > 0 && assignments.every((assignment) => assignment.status === "done" || assignment.status === "skipped" || live.results.has(assignment.employeeId));
+  const synthesizing = live.events.some((event) => event.type === "run.synthesizing") && !live.terminal;
+  const usage = task?.usage?.totalTokens || 0;
+  const rows = [];
+  const planningCopy = planSummary
+    || (planningDone ? "Delegation plan restored from the saved run." : status === "queued" ? "Waiting for a free run slot." : "Choosing employees and writing assignments…");
+  rows.push(`<li class="live-step ${planningDone ? "done" : status === "queued" ? "waiting" : "working"}">
+    <span class="live-step-icon" aria-hidden="true">${planningDone ? "✓" : status === "queued" ? "◷" : "◌"}</span>
+    <div><strong>Executive plans the task</strong><small>${escapeHtml(planningCopy)}</small></div>
+  </li>`);
+  for (const assignment of assignments) {
+    const result = live.results.get(assignment.employeeId) || assignment.result || "";
+    const stepStatus = result
+      ? "done"
+      : assignment.status === "awaiting_approval" || (approval && assignment.employeeName === (approval.employeeName || approval.agent))
+        ? "waiting"
+        : live.started.has(assignment.employeeId)
+          ? "working"
+          : "pending";
+    rows.push(`<li class="live-step ${stepStatus}">
+      <span class="live-step-icon" aria-hidden="true">${stepStatus === "done" ? "✓" : stepStatus === "working" ? "◌" : stepStatus === "waiting" ? "◷" : "·"}</span>
+      <div>
+        <strong>${escapeHtml(assignment.employeeName)}</strong>
+        <small>${escapeHtml(assignment.task)}</small>
+        ${result ? `<details class="live-result"><summary>Result</summary><div>${richText(result)}</div></details>` : `<span class="live-wait-hint">${stepStatus === "waiting" ? "Waiting for your approval" : stepStatus === "working" ? "Working…" : "Queued"}</span>`}
+      </div>
+    </li>`);
+  }
+  if (assignments.length) {
+    rows.push(`<li class="live-step ${live.status === "done" ? "done" : synthesizing || allAssignmentsDone ? "working" : "pending"}">
+      <span class="live-step-icon" aria-hidden="true">${live.status === "done" ? "✓" : synthesizing || allAssignmentsDone ? "◌" : "·"}</span>
+      <div><strong>Executive synthesis</strong><small>${live.status === "done" ? "Summary saved to run history." : synthesizing || allAssignmentsDone ? "Combining employee results…" : "Starts after employee results."}</small></div>
+    </li>`);
+  }
+  host.innerHTML = `<div class="live-run-card ${escapeHtml(runStatusClass(status))}">
+    <div class="live-run-head">
+      <div class="live-run-title">${statusBadge(status)}<h3>${escapeHtml(task?.prompt || "Executive run")}</h3><p class="live-run-meta"><span>Run <code>${escapeHtml(live.runId.slice(-8))}</code></span><span id="live-elapsed">—</span>${usage ? `<span>${formatTokens(usage)} tokens</span>` : ""}${live.connectionLost && !live.terminal ? '<span class="live-connection">Reconnecting…</span>' : ""}</p></div>
+      <div class="live-run-actions">
+        ${isActiveStatus(status) ? `<button class="small-action" type="button" data-cancel-run="${escapeHtml(live.runId)}">Cancel run</button>` : ""}
+        <button class="small-action" type="button" data-open-run="${escapeHtml(live.runId)}">Open run</button>
+        ${!isActiveStatus(status) ? '<button class="small-action" type="button" data-dismiss-live>Dismiss</button>' : ""}
+      </div>
+    </div>
+    <ol class="live-steps">${rows.join("")}</ol>
+    ${approval ? `<div class="live-approval"><span class="mcp-mark">MCP</span><div><strong>Approval required</strong><small>${escapeHtml(approval.employeeName || approval.agent)} wants to call <code>${escapeHtml(approval.toolName || approval.mcp?.toolName)}</code> on ${escapeHtml(approval.connectorLabel || approval.mcp?.connectorLabel)}. Exact arguments are in Approvals.</small></div><button class="small-action" type="button" data-scroll-approvals>Review</button></div>` : ""}
+    ${live.terminal && task?.summary ? `<div class="live-summary">${richText(task.summary)}</div>` : ""}
+    ${live.terminal && !task ? '<p class="live-wait-hint">The run finished. Refreshing saved results…</p>' : ""}
+  </div>`;
+  updateLiveClock();
+}
+
+/* --------------------------- workspace ----------------------------- */
+
 async function commitWorkspace(mutator, successMessage) {
-  if (!stateReady) { toast("Workspace is not connected to the local server", true); return false; }
+  if (!stateReady) {
+    toast("Workspace is not connected to the local server", true);
+    return false;
+  }
   const before = structuredClone(state);
   mutator();
   render();
   try {
-    await apiRequest("/api/state", { method: "PUT", body: JSON.stringify(state) });
-    $("#sync-status").textContent = "Saved just now";
+    const saved = await apiRequest("/api/state", { method: "PUT", body: JSON.stringify(state) });
+    state = saved;
+    executive = saved.executive;
+    render();
+    setSync("Saved just now");
     if (successMessage) toast(successMessage);
     return true;
   } catch (error) {
@@ -82,186 +867,120 @@ async function commitWorkspace(mutator, successMessage) {
   }
 }
 
-function render() {
-  renderOrgChart();
-  renderApprovals();
-  renderActivity();
-  renderTasks();
-  renderTools();
-  renderConnectors();
-  updateMetrics();
-}
-
-function renderOrgChart() {
-  const selected = document.querySelector(".branch-item.selected")?.dataset.branch || "all";
-  const visibleBranches = selected === "all" ? branches : branches.filter((branch) => branch === selected);
-  const executiveTools = executive.tools.filter((name) => state.tools.some((tool) => tool.name === name && tool.connected)).length;
-  const branchCards = visibleBranches.map((branch) => {
-    const agents = state.agents.filter((agent) => agent.branch === branch);
-    const branchClass = branch === "San Francisco" ? "sf" : branch.toLowerCase().split(" ")[0];
-    const renderAgentNode = (agent, nested = false) => {
-      const manager = agent.managerId === "exec" ? executive.name : agentById(agent.managerId)?.name || executive.name;
-      const children = agents.filter((child) => child.managerId === agent.id);
-      const row = `<div class="branch-agent">
-        <span class="agent-avatar" aria-hidden="true">${escapeHtml(initials(agent.name))}</span>
-        <span class="agent-info"><span class="agent-name">${escapeHtml(agent.name)}</span><span class="agent-role">${escapeHtml(agent.role)} · reports to ${escapeHtml(manager)}</span><span class="agent-capabilities">${escapeHtml(agent.capabilities.join(", ") || "No capabilities listed")}</span></span>
-        <span class="agent-status" aria-label="${agent.status === "active" ? "Active" : "Idle"}">${agent.status === "active" ? "Active" : "Idle"}</span>
-        <button class="agent-edit" data-edit-agent="${escapeHtml(agent.id)}" aria-label="Edit ${escapeHtml(agent.name)}" title="Edit employee">✎</button>
-      </div>`;
-      return `${nested ? `<div class="agent-children">${row}</div>` : row}${children.map((child) => renderAgentNode(child, true)).join("")}`;
-    };
-    const roots = agents.filter((agent) => agent.managerId === "exec" || !agents.some((candidate) => candidate.id === agent.managerId));
-    return `<section class="branch-card" aria-label="${escapeHtml(branch)} branch">
-      <div class="branch-card-head"><span class="branch-dot ${escapeHtml(branchClass)}"></span>${escapeHtml(branch)}<small>${agents.length} ${agents.length === 1 ? "EMPLOYEE" : "EMPLOYEES"}</small></div>
-      ${agents.length ? roots.map((agent) => renderAgentNode(agent)).join("") : `<div class="empty-branch">No employees in this branch yet.</div>`}
-    </section>`;
-  }).join("");
-  $("#org-chart").innerHTML = `<article class="ceo-card">
-    <span class="agent-avatar ceo" aria-hidden="true">${escapeHtml(initials(executive.name))}</span>
-    <span class="agent-info"><span class="agent-name-row"><span class="agent-name">${escapeHtml(executive.name)}</span><span class="ceo-label">EXECUTIVE</span></span><span class="agent-role">${escapeHtml(executive.role)} · coordinates all branches</span></span>
-    <span class="agent-status">${executiveTools} labels</span>
-  </article><div class="org-branches">${branchCards}</div>`;
-  $$(".branch-count").forEach((node) => {
-    const branch = node.closest(".branch-item")?.dataset.branch;
-    node.textContent = branch === "all" ? state.agents.length : state.agents.filter((agent) => agent.branch === branch).length;
-  });
-  $(".branch-item[data-branch='all']")?.classList.toggle("selected", selected === "all");
-}
-
-function renderApprovals() {
-  const list = $("#approval-list");
-  if (!stateReady) {
-    list.innerHTML = '<div class="approval-empty">Connect to the local server to load approval history.</div>';
-  } else if (!state.approvals.some((item) => !item.mcp) && !state.approvals.length) {
-    list.innerHTML = '<div class="approval-empty">You’re all caught up. New requests will appear here.</div>';
-  } else {
-    list.innerHTML = state.approvals.filter((item) => !item.mcp && !item.connectorId).map((approval) => `<article class="approval-card">
-      <div class="approval-meta"><span class="approval-avatar">${escapeHtml(approval.initials)}</span><strong>${escapeHtml(approval.agent)}</strong><span>requested review</span><span class="approval-time">${escapeHtml(approval.time)}</span></div>
-      <p class="approval-title">${escapeHtml(approval.action)}</p><p class="approval-desc">${escapeHtml(approval.detail)}</p>
-      <div class="approval-actions"><button class="small-action approve" data-approval="${escapeHtml(approval.id)}" data-decision="approved">Approve</button><button class="small-action" data-approval="${escapeHtml(approval.id)}" data-decision="rejected">Reject</button></div>
-    </article>`).join("");
-  }
-  const mcpHost = $("#mcp-pending-list");
-  const pending = (state.approvals || []).filter((item) => item.mcp || item.connectorId);
-  mcpHost.innerHTML = pending.map((approval) => {
-    const call = approval.mcp || approval;
-    const employee = approval.employeeName || approval.agent || "Employee agent";
-    return `<article class="mcp-approval-card">
-    <div class="mcp-approval-meta"><span class="mcp-mark">MCP</span><div><strong>${escapeHtml(call.connectorLabel || "Remote MCP server")}</strong><small>${escapeHtml(employee)} · ${escapeHtml(call.toolName)}</small></div></div>
-    <p class="mcp-approval-warning">Approving sends these exact arguments to the remote server and may trigger an external action.</p>
-    <pre class="mcp-arguments">${escapeHtml(JSON.stringify(call.arguments ?? {}, null, 2))}</pre>
-    <div class="approval-actions"><button class="small-action approve" data-mcp-approval="${escapeHtml(approval.id)}" data-decision="approved">Approve this call</button><button class="small-action" data-mcp-approval="${escapeHtml(approval.id)}" data-decision="rejected">Reject</button></div>
-  </article>`;
-  }).join("");
-  const count = state.approvals.length;
-  $("#approval-count-badge").textContent = count;
-  $("#approval-nav-count").textContent = count;
-  $("#approval-nav-count").classList.toggle("attention", count > 0);
-  $("#pending-approvals-metric").textContent = String(count).padStart(2, "0");
-  const approvalEmployees = new Set(state.approvals.map((approval) => approval.agent)).size;
-  $("#approval-employee-count").textContent = `across ${approvalEmployees} ${approvalEmployees === 1 ? "employee" : "employees"}`;
-}
-
-function renderActivity() {
-  const events = showAllActivity ? state.activities : state.activities.slice(0, 6);
-  $("#activity-feed").innerHTML = !stateReady ? '<div class="approval-empty">Workspace history is unavailable while the local server is offline.</div>' : events.map((event) => `<article class="activity-item">
-    <span class="activity-icon ${escapeHtml(event.kind)}" aria-hidden="true">${escapeHtml(event.icon)}</span>
-    <span class="activity-copy"><strong>${escapeHtml(event.agent)}</strong> ${escapeHtml(event.action)} <strong>${escapeHtml(event.target)}</strong><small>${escapeHtml(event.detail)}</small></span>
-    <time class="activity-time">${escapeHtml(event.time)}</time>
-  </article>`).join("");
-  $("#load-activity").hidden = state.activities.length <= 6;
-  $("#load-activity").textContent = showAllActivity ? "Show recent activity ↑" : `View all ${state.activities.length} events →`;
-}
-
-function renderTasks() {
-  const host = $("#task-results");
-  const tasks = state.tasks || [];
-  if (!stateReady) {
-    host.innerHTML = '<div class="task-empty">Start the local server to load saved task runs.</div>';
-    return;
-  }
-  if (!tasks.length) {
-    host.innerHTML = '<div class="task-empty">Completed and failed task runs will be saved here.</div>';
-    return;
-  }
-  host.innerHTML = tasks.slice(0, 3).map((task) => `<article class="task-result ${task.status === "failed" ? "failed" : task.status === "waiting_approval" ? "waiting" : "completed"}">
-    <div class="task-result-head"><div><span class="task-result-label">${task.status === "failed" ? "RUN FAILED" : task.status === "waiting_approval" ? "WAITING FOR APPROVAL" : "EXECUTIVE SUMMARY"}</span><h3>${escapeHtml(task.prompt)}</h3></div><time>${escapeHtml(formatTaskDate(task.createdAt))}</time></div>
-    ${task.summary ? `<p class="task-summary">${escapeHtml(task.summary)}</p>` : `<p class="task-summary">${task.status === "failed" ? escapeHtml(task.error || "The run failed. Check the gateway configuration and try again.") : task.status === "waiting_approval" ? "Paused until the requested MCP call is approved or rejected." : "No executive summary was returned."}</p>`}
-    ${task.assignments?.length ? `<div class="assignment-list">${task.assignments.map((assignment) => `<div class="assignment-result"><div><strong>${escapeHtml(assignment.employeeName)}</strong><small>${escapeHtml(assignment.task)}</small></div><p>${escapeHtml(assignment.result || "No result returned.")}</p></div>`).join("")}</div>` : ""}
-  </article>`).join("");
-}
-
-function formatTaskDate(value) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
-}
-
-function renderTools() {
-  const enabled = state.tools.filter((tool) => tool.connected).length;
-  $("#tool-count").textContent = `${enabled} labels`;
-  $("#tool-list").innerHTML = state.tools.map((tool, index) => `<div class="tool-row">
-    <span class="tool-logo ${escapeHtml(tool.style)}" aria-hidden="true">${escapeHtml(tool.glyph)}</span>
-    <span class="tool-copy"><strong>${escapeHtml(tool.name)}</strong><small>${escapeHtml(tool.category)} · not connected</small></span>
-    <span class="tool-state ${tool.connected ? "" : "off"}">${tool.connected ? "Listed" : "Disabled"}</span>
-    <button class="toggle" type="button" role="switch" aria-checked="${tool.connected}" aria-label="${tool.connected ? "Disable" : "Enable"} ${escapeHtml(tool.name)} permission label; not connected" data-toggle-tool="${index}"></button>
-  </div>`).join("");
-}
-
-function renderConnectors() {
-  const host = $("#mcp-connector-list");
-  const connectors = state.connectors || [];
-  if (!stateReady) { host.innerHTML = '<div class="approval-empty">Connector settings require the local server.</div>'; return; }
-  if (!connectors.length) { host.innerHTML = '<div class="approval-empty">No MCP servers configured. Add one to make explicitly granted tools available.</div>'; return; }
-  host.innerHTML = connectors.map((connector) => `<article class="mcp-connector-card ${connector.enabled ? "" : "disabled"}">
-    <div class="mcp-connector-heading"><span class="mcp-mark">MCP</span><div><strong>${escapeHtml(connector.label)}</strong><small>${escapeHtml(connector.url)}</small></div><span class="connector-badge">${connector.enabled ? "ENABLED" : "DISABLED"}</span></div>
-    <p>${escapeHtml(connector.description || "No description")}</p><div class="connector-tools">${(connector.allowedTools || []).map((tool) => `<span>${escapeHtml(tool)}</span>`).join("")}</div>
-    <small class="token-state">${connector.hasBearerToken ? "Server-held bearer token saved" : "No bearer token saved"}</small>
-    <div class="connector-actions"><button type="button" data-edit-connector="${escapeHtml(connector.id)}">Edit</button><button type="button" data-toggle-connector="${escapeHtml(connector.id)}">${connector.enabled ? "Disable" : "Enable"}</button><button type="button" class="danger-link" data-delete-connector="${escapeHtml(connector.id)}">Remove</button></div>
-  </article>`).join("");
-}
-
-function updateMetrics() {
-  if (!stateReady) {
-    $("#active-agents-metric").textContent = "—";
-    $("#agent-nav-count").textContent = "—";
-    return;
-  }
-  const active = state.agents.filter((agent) => agent.status === "active").length + (executive.status === "active" ? 1 : 0);
-  $("#active-agents-metric").innerHTML = `${active}<span class="metric-total"> / ${state.agents.length + 1}</span>`;
-  $("#agent-nav-count").textContent = state.agents.length;
-}
-
 function logActivity(kind, icon, agent, action, target, detail) {
   state.activities.unshift({ id: `evt-${Date.now()}`, kind, icon, agent, action, target, detail, time: "just now" });
+  state.activities = state.activities.slice(0, 500);
 }
 
-function toast(message, error = false) {
-  const node = document.createElement("div");
-  node.className = `toast${error ? " error" : ""}`;
-  node.textContent = message;
-  $("#toast-region").append(node);
-  window.setTimeout(() => node.remove(), 3200);
+async function startRun(prompt) {
+  if (backendOutdated) {
+    setTaskMessage("Restart the server to load the run engine. The running process is an older build.");
+    toast("Restart `node server.mjs` before starting a run", true);
+    return false;
+  }
+  try {
+    setTaskMessage("Starting run…");
+    const response = await apiRequest("/api/workflows", { method: "POST", body: JSON.stringify({ prompt }) });
+    await refreshWorkspace({ quiet: true });
+    attachRun(response.runId);
+    setTaskMessage("Run started. Progress below streams live; the saved result also appears in run history.");
+    $("#live-run").scrollIntoView({ behavior: "smooth", block: "center" });
+    toast(gateway.mode === "demo" ? "Demo run started (simulated)" : "Run started");
+    return true;
+  } catch (error) {
+    setTaskMessage(`Task did not start: ${error.message}`);
+    toast(error.message, true);
+    return false;
+  }
 }
+
+async function cancelRun(runId) {
+  if (!window.confirm("Cancel this run? Pending tool approvals for it will be discarded.")) return;
+  try {
+    await apiRequest(`/api/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" });
+    await refreshWorkspace({ quiet: true });
+    if (live?.runId === runId) {
+      live.terminal = true;
+      live.status = "canceled";
+      live.endedAtMs = Date.now();
+      stopLivePolling();
+      renderLive();
+    }
+    toast("Run canceled.");
+  } catch (error) {
+    toast(`Run was not canceled. ${error.message}`, true);
+  }
+}
+
+async function decideMcpApproval(approvalId, decision, button) {
+  if (button) button.disabled = true;
+  try {
+    const response = await apiRequest(`/api/mcp/approvals/${encodeURIComponent(approvalId)}`, { method: "POST", body: JSON.stringify({ decision }) });
+    await refreshWorkspace({ quiet: true });
+    if (response.runId) attachRun(response.runId);
+    if (response.pendingApproval) toast(`Another MCP call needs review: ${response.pendingApproval.toolName}`);
+    else toast(decision === "approved" ? "Call approved; the workflow resumed." : "Call rejected; the workflow resumed.");
+  } catch (error) {
+    if (button) button.disabled = false;
+    toast(`Approval decision was not completed. ${error.message}`, true);
+  }
+}
+
+async function decideSeedApproval(approvalId, decision) {
+  const approval = state.approvals.find((item) => item.id === approvalId);
+  if (!approval) return;
+  const approved = decision === "approved";
+  await commitWorkspace(() => {
+    state.approvals = state.approvals.filter((item) => item.id !== approvalId);
+    logActivity(approved ? "complete" : "reject", approved ? "✓" : "×", approval.agent, approved ? "received approval to" : "had a request rejected for", approval.action, "Local workspace · review example");
+  }, `${approved ? "Approved" : "Rejected"}: ${approval.action}`);
+}
+
+/* ----------------------------- dialogs ----------------------------- */
 
 function openAgentDialog(agent = null) {
   const form = $("#agent-form");
   form.reset();
+  const branches = allBranches();
+  const branch = agent?.branch || branches[0] || "Remote";
+  if (!branches.includes(branch)) branches.push(branch);
+  $("#agent-branch").innerHTML = branches.map((item) => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join("");
   $("#agent-id").value = agent?.id || "";
   $("#agent-name").value = agent?.name || "";
   $("#agent-role").value = agent?.role || "";
-  $("#agent-branch").value = agent?.branch || branches[0];
-  $("#agent-capabilities").value = agent?.capabilities.join(", ") || "";
+  $("#agent-branch").value = branch;
+  $("#agent-capabilities").value = agent?.capabilities?.join(", ") || "";
   $("#agent-status").value = agent?.status || "active";
-  renderManagerOptions(agent?.branch || branches[0], agent?.managerId || "exec", agent?.id || "");
+  renderManagerOptions(branch, agent?.managerId || "exec", agent?.id || "");
   $("#agent-dialog-title").textContent = agent ? "Edit employee" : "Create employee";
   $("#save-agent-button").textContent = agent ? "Save changes" : "Create employee";
-  $("#form-tool-options").innerHTML = state.tools.map((tool, index) => `<label class="tool-option"><input type="checkbox" name="agent-tool" value="${escapeHtml(tool.name)}" ${agent?.tools.includes(tool.name) ? "checked" : ""} ${tool.connected ? "" : "disabled"}><span>${escapeHtml(tool.name)}${tool.connected ? "" : " · disabled"}</span></label>`).join("");
+  const stats = agent ? agentStats(agent.id) : null;
+  const statsNode = $("#agent-stats");
+  if (stats) {
+    statsNode.hidden = false;
+    statsNode.innerHTML = `<strong>${plural(stats.runs, "run")}</strong> · ${stats.completed} completed${stats.tokens ? ` · ${formatTokens(stats.tokens)} tokens` : ""}${stats.last ? ` · last ${timeAgo(stats.last)}` : ""}`;
+  } else {
+    statsNode.hidden = true;
+    statsNode.textContent = "";
+  }
+  $("#form-tool-options").innerHTML = state.tools.length
+    ? state.tools
+        .map(
+          (tool) => `<label class="tool-option"><input type="checkbox" name="agent-tool" value="${escapeHtml(tool.name)}" ${agent?.tools?.includes(tool.name) ? "checked" : ""} ${tool.connected ? "" : "disabled"}><span>${escapeHtml(tool.name)}${tool.connected ? "" : " · disabled"}</span></label>`,
+        )
+        .join("")
+    : '<small class="field-hint">No tool labels yet. Add one under Integrations.</small>';
   const grants = agent?.mcpGrants || [];
-  const grantOptions = (state.connectors || []).filter((connector) => connector.enabled).map((connector) => {
-    const selected = grants.find((grant) => grant.connectorId === connector.id)?.tools || [];
-    return `<fieldset class="mcp-grant-group"><legend>${escapeHtml(connector.label)}</legend>${connector.allowedTools.map((tool) => `<label class="tool-option"><input type="checkbox" name="mcp-grant" data-connector-id="${escapeHtml(connector.id)}" value="${escapeHtml(tool)}" ${selected.includes(tool) ? "checked" : ""}><span>${escapeHtml(tool)}</span></label>`).join("")}</fieldset>`;
-  }).join("");
-  $("#form-mcp-options").innerHTML = grantOptions || '<small class="field-hint">No enabled MCP servers. Add a server in Integrations first.</small>';
+  const grantOptions = (state.connectors || [])
+    .filter((connector) => connector.enabled)
+    .map((connector) => {
+      const selected = grants.find((grant) => grant.connectorId === connector.id)?.tools || [];
+      return `<fieldset class="mcp-grant-group"><legend>${escapeHtml(connector.label)}</legend>${connector.allowedTools
+        .map((tool) => `<label class="tool-option"><input type="checkbox" name="mcp-grant" data-connector-id="${escapeHtml(connector.id)}" value="${escapeHtml(tool)}" ${selected.includes(tool) ? "checked" : ""}><span>${escapeHtml(tool)}</span></label>`)
+        .join("")}</fieldset>`;
+    })
+    .join("");
+  $("#form-mcp-options").innerHTML = grantOptions || '<small class="field-hint">No enabled MCP servers. Add one in Integrations first.</small>';
   let remove = $("#remove-agent-button");
   if (agent && !remove) {
     remove = document.createElement("button");
@@ -284,8 +1003,7 @@ function renderManagerOptions(branch, selectedId = "exec", currentId = "") {
 }
 
 function openConnectorDialog(connector = null) {
-  const form = $("#mcp-form");
-  form.reset();
+  $("#mcp-form").reset();
   $("#mcp-connector-id").value = connector?.id || "";
   $("#mcp-label").value = connector?.label || "";
   $("#mcp-url").value = connector?.url || "";
@@ -293,7 +1011,7 @@ function openConnectorDialog(connector = null) {
   $("#mcp-tools").value = (connector?.allowedTools || []).join("\n");
   $("#mcp-enabled").checked = connector?.enabled ?? true;
   $("#mcp-token").value = "";
-  $("#mcp-token").placeholder = connector?.hasBearerToken ? "Saved token · blank keeps it" : "Optional bearer token";
+  $("#mcp-token").placeholder = connector?.hasBearerToken ? "Saved token · leave blank to keep it" : "Optional bearer token";
   $("#mcp-dialog-title").textContent = connector ? "Edit MCP server" : "Add MCP server";
   $("#save-mcp-button").textContent = connector ? "Save changes" : "Save connector";
   $("#mcp-dialog").showModal();
@@ -304,83 +1022,353 @@ async function saveConnector(data, isNew = false, idOverride = "") {
   try {
     const id = idOverride || $("#mcp-connector-id").value;
     const endpoint = id ? `/api/connectors/${encodeURIComponent(id)}` : "/api/connectors";
-    const method = id ? "PUT" : "POST";
-    await apiRequest(endpoint, { method, body: JSON.stringify(data) });
-    await refreshWorkspace();
+    await apiRequest(endpoint, { method: id ? "PUT" : "POST", body: JSON.stringify(data) });
+    await refreshWorkspace({ quiet: true });
     $("#mcp-dialog").close();
     toast(isNew ? "MCP server saved. Grant tools to employees before use." : "MCP server updated");
     return true;
-  } catch (error) { toast(`Connector was not saved. ${error.message}`, true); return false; }
+  } catch (error) {
+    toast(`Connector was not saved. ${error.message}`, true);
+    return false;
+  }
 }
 
-$("#agent-branch").addEventListener("change", (event) => renderManagerOptions(event.target.value, "exec", $("#agent-id").value));
+function openUsage() {
+  const budget = gateway.budget || 100000;
+  const used = state.usage?.totalTokens || 0;
+  const input = state.usage?.inputTokens || 0;
+  const output = state.usage?.outputTokens || 0;
+  const percent = budget ? Math.min(100, Math.round((used / budget) * 100)) : 0;
+  const tasks = state.tasks || [];
+  const perEmployee = new Map();
+  for (const task of tasks) {
+    for (const assignment of task.assignments || []) {
+      const current = perEmployee.get(assignment.employeeName) || { tokens: 0, runs: 0 };
+      current.tokens += assignment.usage?.totalTokens || 0;
+      current.runs += 1;
+      perEmployee.set(assignment.employeeName, current);
+    }
+  }
+  const employeeRows = [...perEmployee.entries()]
+    .sort((a, b) => b[1].tokens - a[1].tokens)
+    .map(([name, value]) => `<tr><td>${escapeHtml(name)}</td><td>${plural(value.runs, "assignment")}</td><td class="numeric">${formatTokens(value.tokens)}</td></tr>`)
+    .join("");
+  const runRows = tasks
+    .slice(0, 12)
+    .map(
+      (task) =>
+        `<tr><td><span class="usage-run-prompt">${escapeHtml(task.prompt.slice(0, 70))}</span><small>${escapeHtml(formatDate(task.createdAt))}</small></td><td>${statusBadge(task.status)}</td><td class="numeric">${formatTokens(task.usage?.totalTokens || 0)}</td></tr>`,
+    )
+    .join("");
+  $("#usage-report").innerHTML = `
+    <div class="usage-hero"><div><span class="usage-hero-label">Total tokens</span><strong>${used.toLocaleString("en-US")}</strong><small>${percent}% of a ${budget.toLocaleString("en-US")} local budget</small></div><div class="usage-hero-split"><span>Input<strong>${formatTokens(input)}</strong></span><span>Output<strong>${formatTokens(output)}</strong></span></div></div>
+    <progress class="usage-progress" max="100" value="${percent}" aria-label="Local token budget used"></progress>
+    <p class="usage-note">${gateway.mode === "demo" ? "Demo mode reports simulated usage; no provider was contacted." : "Totals come from provider-reported usage when the gateway returns it. Requests without usage metadata count as zero."} Cumulative totals reflect the ${plural(tasks.length, "run")} kept in history; deleting a run does not refund spent tokens.</p>
+    <h3>By employee</h3>
+    ${employeeRows ? `<table class="usage-table"><thead><tr><th>Employee</th><th>Work</th><th class="numeric">Tokens</th></tr></thead><tbody>${employeeRows}</tbody></table>` : '<p class="field-hint">No assignments recorded yet.</p>'}
+    <h3>Recent runs</h3>
+    ${runRows ? `<table class="usage-table"><thead><tr><th>Run</th><th>Status</th><th class="numeric">Tokens</th></tr></thead><tbody>${runRows}</tbody></table>` : '<p class="field-hint">No runs recorded yet.</p>'}
+  `;
+  $("#usage-dialog").showModal();
+}
+
+function openHelp() {
+  $("#help-dialog").showModal();
+}
+
+/* ------------------------------ theme ------------------------------ */
+
+function currentTheme() {
+  return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+}
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  try {
+    localStorage.setItem("agent-factory-theme", theme);
+  } catch {
+    /* storage can be unavailable in private windows */
+  }
+  document.documentElement.dataset.themePreference = theme;
+  updateThemeButton();
+}
+
+function toggleTheme() {
+  const next = currentTheme() === "dark" ? "light" : "dark";
+  applyTheme(next);
+  toast(`${next === "dark" ? "Dark" : "Light"} theme applied`);
+}
+
+function updateThemeButton() {
+  const button = $("#theme-toggle");
+  if (!button) return;
+  const dark = currentTheme() === "dark";
+  button.textContent = dark ? "☀" : "◐";
+  button.title = `Switch to ${dark ? "light" : "dark"} theme`;
+  button.setAttribute("aria-label", button.title);
+}
+
+/* ---------------------------- palette ------------------------------ */
+
+let paletteItems = [];
+let paletteIndex = 0;
+
+function paletteAction(label, hint, group, run) {
+  return { label, hint, group, run };
+}
+
+function buildPaletteItems() {
+  const items = [];
+  const scrollTo = (selector) => $(selector)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  items.push(
+    paletteAction("Overview", "Go to workspace overview", "Navigate", () => scrollTo("#overview")),
+    paletteAction("Employees", "Organization structure", "Navigate", () => scrollTo("#employees")),
+    paletteAction("Runs", "Run history and results", "Navigate", () => scrollTo("#runs")),
+    paletteAction("Approvals", "Review requested actions", "Navigate", () => scrollTo("#approvals")),
+    paletteAction("Integrations", "MCP servers and tool labels", "Navigate", () => scrollTo("#integrations")),
+    paletteAction("Activity", "Workspace activity feed", "Navigate", () => scrollTo("#activity")),
+    paletteAction("Run a task", "Focus the executive workbench", "Actions", () => {
+      scrollTo("#workbench");
+      $("#task-prompt").focus();
+    }),
+    paletteAction("Create employee", "Add a digital employee", "Actions", () => openAgentDialog()),
+    paletteAction("Add MCP server", "Register a remote tool server", "Actions", () => openConnectorDialog()),
+    paletteAction("Add tool label", "Add a permission label", "Actions", () => {
+      $("#tool-form").reset();
+      $("#tool-dialog").showModal();
+      $("#tool-name").focus();
+    }),
+    paletteAction("Export roster CSV", "Download employees and grants", "Actions", () => exportRoster()),
+    paletteAction("Download workspace backup", "JSON backup without connector tokens", "Actions", () => downloadBackup()),
+    paletteAction("Restore workspace backup", "Load a previously downloaded JSON file", "Actions", () => $("#restore-file").click()),
+    paletteAction("Usage report", "Measured token usage", "Actions", () => openUsage()),
+    paletteAction("Switch theme", "Toggle light and dark appearance", "Actions", () => toggleTheme()),
+    paletteAction("Help & shortcuts", "Operator guide", "Actions", () => openHelp()),
+    paletteAction("Reset demo workspace", "Restore seed employees, approvals, and history", "Danger", () => resetWorkspace()),
+  );
+  for (const agent of state.agents) {
+    const stats = agentStats(agent.id);
+    items.push(paletteAction(`Edit ${agent.name}`, `${agent.role} · ${agent.branch} · ${plural(stats.runs, "run")}`, "Employees", () => openAgentDialog(agent)));
+  }
+  for (const task of (state.tasks || []).slice(0, 12)) {
+    items.push(
+      paletteAction(`Open run: ${task.prompt.slice(0, 64)}`, `${runStatusLabel(task.status)} · ${formatDate(task.createdAt)}`, "Runs", () => {
+        expandedRuns.add(task.id);
+        runFilter = "all";
+        $("#run-filter").value = "all";
+        renderRuns();
+        scrollTo("#runs");
+        const node = $(`[data-toggle-run="${CSS.escape(task.id)}"]`)?.closest(".run-card");
+        node?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }),
+    );
+  }
+  return items;
+}
+
+function openPalette() {
+  paletteItems = buildPaletteItems();
+  paletteIndex = 0;
+  $("#palette-input").value = "";
+  renderPalette();
+  $("#palette-dialog").showModal();
+  $("#palette-input").focus();
+}
+
+function filteredPaletteItems() {
+  const query = $("#palette-input").value.trim().toLowerCase();
+  if (!query) return paletteItems;
+  return paletteItems.filter((item) => `${item.group} ${item.label} ${item.hint}`.toLowerCase().includes(query));
+}
+
+function renderPalette() {
+  const items = filteredPaletteItems();
+  if (paletteIndex >= items.length) paletteIndex = Math.max(0, items.length - 1);
+  const host = $("#palette-results");
+  if (!items.length) {
+    host.innerHTML = '<div class="palette-empty">No matching command. Try an employee name, “run”, or “theme”.</div>';
+    return;
+  }
+  let lastGroup = "";
+  host.innerHTML = items
+    .map((item, index) => {
+      const heading = item.group !== lastGroup ? `<div class="palette-group" role="presentation">${escapeHtml(item.group)}</div>` : "";
+      lastGroup = item.group;
+      return `${heading}<button type="button" role="option" aria-selected="${index === paletteIndex}" class="palette-item ${index === paletteIndex ? "selected" : ""}" data-palette-index="${index}"><span>${escapeHtml(item.label)}</span><small>${escapeHtml(item.hint)}</small></button>`;
+    })
+    .join("");
+}
+
+function runPaletteIndex(index) {
+  const items = filteredPaletteItems();
+  const item = items[index];
+  if (!item) return;
+  $("#palette-dialog").close();
+  window.setTimeout(() => item.run(), 30);
+}
+
+/* -------------------------- workspace ops -------------------------- */
+
+function exportRoster() {
+  const connectorName = (id) => state.connectors.find((connector) => connector.id === id)?.label || id;
+  const rows = [
+    ["Name", "Role", "Branch", "Manager", "Capabilities", "Status", "Tool permission labels", "MCP tool grants"],
+    ...state.agents.map((agent) => {
+      const manager = agent.managerId === "exec" ? executive.name : agentById(agent.managerId)?.name || executive.name;
+      const grants = (agent.mcpGrants || []).map((grant) => `${connectorName(grant.connectorId)}: ${grant.tools.join("; ")}`).join(" | ");
+      return [agent.name, agent.role, agent.branch, manager, agent.capabilities.join("; "), agent.status, agent.tools.join("; "), grants];
+    }),
+  ];
+  const csv = rows.map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `agent-factory-roster-${new Date().toISOString().slice(0, 10)}.csv`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+  toast("Workspace roster exported as CSV");
+}
+
+async function downloadBackup() {
+  if (backendOutdated) {
+    toast("Restart the server to enable workspace backups", true);
+    return;
+  }
+  try {
+    const response = await fetch("/api/workspace/backup", { credentials: "same-origin" });
+    if (!response.ok) throw new Error(`Backup failed (${response.status})`);
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `agent-factory-workspace-${new Date().toISOString().slice(0, 10)}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    toast("Workspace backup downloaded (connector tokens are not included)");
+  } catch (error) {
+    toast(`Backup was not created. ${error.message}`, true);
+  }
+}
+
+async function restoreBackup(file) {
+  if (!file) return;
+  if (backendOutdated) {
+    toast("Restart the server to enable workspace restore", true);
+    return;
+  }
+  try {
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+    const candidate = parsed?.state || parsed;
+    if (!candidate?.executive || !Array.isArray(candidate.agents)) throw new Error("This file is not an Agent Factory workspace backup.");
+    if (!window.confirm("Restore this workspace backup? Current employees, runs, and approvals will be replaced.")) return;
+    detachRun();
+    await apiRequest("/api/workspace/restore", { method: "POST", body: JSON.stringify({ state: candidate }) });
+    await refreshWorkspace({ quiet: true });
+    toast("Workspace restored. Connector tokens must be re-entered.");
+  } catch (error) {
+    toast(`Backup was not restored. ${error.message}`, true);
+  } finally {
+    $("#restore-file").value = "";
+  }
+}
+
+async function resetWorkspace() {
+  if (backendOutdated) {
+    toast("Restart the server to enable workspace reset", true);
+    return;
+  }
+  if (!window.confirm("Reset this workspace to the seed demo data? Runs, approvals, employees, and connector tokens will be replaced.")) return;
+  try {
+    detachRun();
+    await apiRequest("/api/workspace/reset", { method: "POST" });
+    await refreshWorkspace({ quiet: true });
+    toast("Demo workspace reset");
+  } catch (error) {
+    toast(`Workspace was not reset. ${error.message}`, true);
+  }
+}
+
+/* ---------------------------- actions ------------------------------ */
 
 document.addEventListener("click", async (event) => {
-  const edit = event.target.closest("[data-edit-agent]");
-  if (edit) openAgentDialog(agentById(edit.dataset.editAgent));
+  const target = event.target;
 
-  const branchLink = event.target.closest(".branch-item");
-  if (branchLink) {
-    event.preventDefault();
-    $$(".branch-item").forEach((node) => node.classList.remove("selected"));
-    branchLink.classList.add("selected");
-    renderOrgChart();
-    $("#employees").scrollIntoView({ behavior: "smooth", block: "start" });
+  const editAgent = target.closest("[data-edit-agent]");
+  if (editAgent) {
+    openAgentDialog(agentById(editAgent.dataset.editAgent));
+    return;
   }
 
-  const navLink = event.target.closest(".nav-item");
+  const branchLink = target.closest(".branch-item[data-branch]");
+  if (branchLink) {
+    event.preventDefault();
+    selectedBranch = branchLink.dataset.branch;
+    renderBranchList();
+    renderOrgChart();
+    $("#employees").scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
+  const navLink = target.closest(".nav-item");
   if (navLink) {
     $$(".nav-item").forEach((node) => node.classList.remove("active"));
     navLink.classList.add("active");
     $("#current-view-label").textContent = navLink.textContent.trim().replace(/\s+\d+$/, "");
+    return;
   }
 
-  const decision = event.target.closest("[data-approval]");
-  if (decision) {
-    if (!stateReady) { toast("Workspace is not connected to the local server", true); return; }
-    const index = state.approvals.findIndex((approval) => approval.id === decision.dataset.approval);
-    if (index >= 0) {
-      const approval = state.approvals[index];
-      const approved = decision.dataset.decision === "approved";
-      await commitWorkspace(() => {
-        state.approvals.splice(index, 1);
-        logActivity(approved ? "complete" : "reject", approved ? "✓" : "×", approval.agent, approved ? "received approval to" : "had a request rejected for", approval.action, "Local workspace · seeded review example");
-      }, `${approved ? "Approved" : "Rejected"}: ${approval.action}`);
+  const seedDecision = target.closest("[data-approval]");
+  if (seedDecision) {
+    if (!stateReady) {
+      toast("Workspace is not connected to the local server", true);
+      return;
     }
+    await decideSeedApproval(seedDecision.dataset.approval, seedDecision.dataset.decision);
+    return;
   }
 
-  const mcpDecision = event.target.closest("[data-mcp-approval]");
+  const mcpDecision = target.closest("[data-mcp-approval]");
   if (mcpDecision) {
-    mcpDecision.disabled = true;
-    try {
-      const response = await apiRequest(`/api/mcp/approvals/${encodeURIComponent(mcpDecision.dataset.mcpApproval)}`, { method: "POST", body: JSON.stringify({ decision: mcpDecision.dataset.decision }) });
-      await refreshWorkspace();
-      if (response.pendingApproval) toast(`Another MCP call needs review: ${response.pendingApproval.toolName}`);
-      else if (response.task?.status === "done") toast("Approval handled; workflow completed.");
-      else if (response.task?.status === "failed") toast(response.task.summary || "Workflow failed after approval.", true);
-      else toast(mcpDecision.dataset.decision === "approved" ? "Call approved; workflow resumed." : "Call rejected; workflow resumed.");
-    } catch (error) { mcpDecision.disabled = false; toast(`Approval decision was not completed. ${error.message}`, true); }
+    await decideMcpApproval(mcpDecision.dataset.mcpApproval, mcpDecision.dataset.decision, mcpDecision);
+    return;
   }
 
-  const connectorEdit = event.target.closest("[data-edit-connector]");
-  if (connectorEdit) openConnectorDialog((state.connectors || []).find((item) => item.id === connectorEdit.dataset.editConnector));
-  const connectorToggle = event.target.closest("[data-toggle-connector]");
-  if (connectorToggle) {
-    const connector = (state.connectors || []).find((item) => item.id === connectorToggle.dataset.toggleConnector);
-    if (connector) await saveConnector({ label: connector.label, url: connector.url, description: connector.description, allowedTools: connector.allowedTools, enabled: !connector.enabled }, false, connector.id);
+  const editConnector = target.closest("[data-edit-connector]");
+  if (editConnector) {
+    openConnectorDialog((state.connectors || []).find((item) => item.id === editConnector.dataset.editConnector));
+    return;
   }
-  const connectorDelete = event.target.closest("[data-delete-connector]");
-  if (connectorDelete) {
-    const connector = (state.connectors || []).find((item) => item.id === connectorDelete.dataset.deleteConnector);
-    if (connector && window.confirm(`Remove ${connector.label}? Employee grants for it will no longer work.`)) {
-      try { await apiRequest(`/api/connectors/${encodeURIComponent(connector.id)}`, { method: "DELETE" }); await refreshWorkspace(); toast(`${connector.label} removed`); }
-      catch (error) { toast(`Connector was not removed. ${error.message}`, true); }
+  const toggleConnector = target.closest("[data-toggle-connector]");
+  if (toggleConnector) {
+    const connector = (state.connectors || []).find((item) => item.id === toggleConnector.dataset.toggleConnector);
+    if (connector) {
+      await saveConnector(
+        { label: connector.label, url: connector.url, description: connector.description, allowedTools: connector.allowedTools, enabled: !connector.enabled },
+        false,
+        connector.id,
+      );
     }
+    return;
+  }
+  const deleteConnector = target.closest("[data-delete-connector]");
+  if (deleteConnector) {
+    const connector = (state.connectors || []).find((item) => item.id === deleteConnector.dataset.deleteConnector);
+    if (connector && window.confirm(`Remove ${connector.label}? Employee grants for it will no longer work.`)) {
+      try {
+        await apiRequest(`/api/connectors/${encodeURIComponent(connector.id)}`, { method: "DELETE" });
+        await refreshWorkspace({ quiet: true });
+        toast(`${connector.label} removed`);
+      } catch (error) {
+        toast(`Connector was not removed. ${error.message}`, true);
+      }
+    }
+    return;
   }
 
-  const toggle = event.target.closest("[data-toggle-tool]");
-  if (toggle) {
-    const tool = state.tools[Number(toggle.dataset.toggleTool)];
+  const toggleTool = target.closest("[data-toggle-tool]");
+  if (toggleTool) {
+    const tool = state.tools[Number(toggleTool.dataset.toggleTool)];
     if (tool) {
       const enabled = !tool.connected;
       await commitWorkspace(() => {
@@ -388,72 +1376,220 @@ document.addEventListener("click", async (event) => {
         logActivity("tool", "↔", "Workspace admin", `${enabled ? "enabled" : "disabled"} a permission label for`, tool.name, "Local workspace · account not connected");
       }, `${tool.name} permission label ${enabled ? "enabled" : "disabled"}`);
     }
+    return;
   }
 
-  if (event.target.closest("#add-agent-button")) {
+  if (target.closest("#add-agent-button")) {
     if (!stateReady) toast("Workspace is not connected to the local server", true);
     else openAgentDialog();
+    return;
   }
-  if (event.target.closest("#add-tool-button")) {
-    if (!stateReady) { toast("Workspace is not connected to the local server", true); return; }
-    $("#tool-form").reset(); $("#tool-dialog").showModal(); $("#tool-name").focus();
-  }
-  if (event.target.closest("#add-mcp-connector")) { if (!stateReady) toast("Workspace is not connected to the local server", true); else openConnectorDialog(); }
-  if (event.target.closest("[data-close-dialog]")) event.target.closest("dialog")?.close();
-  if (event.target.closest("#remove-agent-button")) {
-    if (!stateReady) { toast("Workspace is not connected to the local server", true); return; }
-    const id = $("#agent-id").value;
-    const agent = agentById(id);
-    const waiting = state.approvals.filter((approval) => approval.agent === agent?.name);
-    if (waiting.length) { toast("Resolve this employee’s pending approvals before removing them", true); return; }
-    if (state.agents.some((employee) => employee.managerId === agent?.id)) { toast("Reassign this employee’s reports before removing them", true); return; }
-    if (agent && window.confirm(`Remove ${agent.name} from the demo workspace?`)) {
-      const removed = await commitWorkspace(() => {
-        state.agents = state.agents.filter((item) => item.id !== id);
-        logActivity("tool", "−", agent.name, "was removed from the employee roster in", agent.branch, "Local workspace · roster change");
-      }, `${agent.name} removed`);
-      if (removed) $("#agent-dialog").close();
+  if (target.closest("#add-tool-button")) {
+    if (!stateReady) {
+      toast("Workspace is not connected to the local server", true);
+      return;
     }
+    $("#tool-form").reset();
+    $("#tool-dialog").showModal();
+    $("#tool-name").focus();
+    return;
   }
-  if (event.target.closest("#export-button")) { if (stateReady) exportReport(); else toast("Workspace is not connected to the local server", true); }
-  if (event.target.closest("#all-approvals")) { showAllActivity = true; renderActivity(); $("#activity").scrollIntoView({ behavior: "smooth", block: "start" }); toast("Approval decisions are included in the activity history"); }
-  if (event.target.closest("#view-all-agents")) { $(".branch-item[data-branch='all']")?.click(); }
-  if (event.target.closest("#load-activity")) { showAllActivity = !showAllActivity; renderActivity(); }
-  if (event.target.closest("#usage-info-button")) toast("Usage figures are seeded demo values, not measured consumption");
-  if (event.target.closest(".notification-button")) $("#approvals").scrollIntoView({ behavior: "smooth", block: "start" });
-  if (event.target.closest(".icon-button[aria-label='Search']")) {
-    const query = window.prompt("Search employees, branches, tools, or activity");
-    if (query?.trim()) {
-      const found = state.agents.find((agent) => `${agent.name} ${agent.role} ${agent.branch}`.toLowerCase().includes(query.toLowerCase())) || state.tools.find((tool) => tool.name.toLowerCase().includes(query.toLowerCase()));
-      toast(found ? `Found ${found.name} in the demo workspace` : "No matching employee or tool found", !found);
+  if (target.closest("#add-mcp-connector")) {
+    if (!stateReady) toast("Workspace is not connected to the local server", true);
+    else openConnectorDialog();
+    return;
+  }
+  if (target.closest("[data-close-dialog]")) {
+    target.closest("dialog")?.close();
+    return;
+  }
+  if (target.closest("#remove-agent-button")) {
+    await removeAgent();
+    return;
+  }
+  if (target.closest("#export-button")) {
+    if (stateReady) exportRoster();
+    else toast("Workspace is not connected to the local server", true);
+    return;
+  }
+  if (target.closest("#all-approvals")) {
+    showAllActivity = true;
+    activityFilter = "approvals";
+    $("#activity-filter").value = "approvals";
+    renderActivity();
+    $("#activity").scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  if (target.closest("#approvals-more")) {
+    toast("Local review examples and pending MCP calls appear here. Resolved decisions stay in activity history.");
+    return;
+  }
+  if (target.closest("#view-all-agents")) {
+    selectedBranch = "all";
+    renderBranchList();
+    renderOrgChart();
+    $("#employees").scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  if (target.closest("#load-activity")) {
+    showAllActivity = !showAllActivity;
+    renderActivity();
+    return;
+  }
+  if (target.closest("#usage-info-button") || target.closest("#backup-from-usage")) {
+    if (target.closest("#backup-from-usage")) downloadBackup();
+    else openUsage();
+    return;
+  }
+  if (target.closest("#notification-button")) {
+    $("#approvals").scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  if (target.closest("#palette-button")) {
+    openPalette();
+    return;
+  }
+  if (target.closest("#theme-toggle")) {
+    toggleTheme();
+    return;
+  }
+  if (target.closest("#help-button")) {
+    openHelp();
+    return;
+  }
+
+  const attach = target.closest("[data-attach-run]");
+  if (attach) {
+    attachRun(attach.dataset.attachRun);
+    $("#workbench").scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  const cancel = target.closest("[data-cancel-run]");
+  if (cancel) {
+    await cancelRun(cancel.dataset.cancelRun);
+    return;
+  }
+  const rerun = target.closest("[data-rerun]");
+  if (rerun) {
+    const task = taskFor(rerun.dataset.rerun);
+    if (task) await startRun(task.prompt);
+    return;
+  }
+  const toggleRun = target.closest("[data-toggle-run]");
+  if (toggleRun) {
+    const id = toggleRun.dataset.toggleRun;
+    if (expandedRuns.has(id)) expandedRuns.delete(id);
+    else expandedRuns.add(id);
+    renderRuns();
+    return;
+  }
+  const deleteRun = target.closest("[data-delete-run]");
+  if (deleteRun) {
+    const task = taskFor(deleteRun.dataset.deleteRun);
+    if (task && window.confirm(`Delete this saved run?\n\n${task.prompt.slice(0, 160)}`)) {
+      try {
+        await apiRequest(`/api/runs/${encodeURIComponent(task.id)}`, { method: "DELETE" });
+        expandedRuns.delete(task.id);
+        await refreshWorkspace({ quiet: true });
+        toast("Run deleted");
+      } catch (error) {
+        toast(`Run was not deleted. ${error.message}`, true);
+      }
+    }
+    return;
+  }
+  const openRun = target.closest("[data-open-run]");
+  if (openRun) {
+    const openTask = taskFor(openRun.dataset.openRun);
+    if (openTask && isActiveStatus(openTask.status)) attachRun(openTask.id);
+    expandedRuns.add(openRun.dataset.openRun);
+    runFilter = "all";
+    $("#run-filter").value = "all";
+    renderRuns();
+    $("#runs").scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  if (target.closest("[data-dismiss-live]")) {
+    detachRun();
+    updateGatewayChrome();
+    render();
+    return;
+  }
+  if (target.closest("[data-scroll-approvals]")) {
+    $("#approvals").scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
+  if (target.closest("#profile-button")) {
+    const menu = $("#profile-menu");
+    const hidden = menu.hidden;
+    menu.hidden = !hidden;
+    $("#profile-button").setAttribute("aria-expanded", String(hidden));
+    return;
+  }
+  const menuAction = target.closest("[data-menu]");
+  if (menuAction) {
+    $("#profile-menu").hidden = true;
+    $("#profile-button").setAttribute("aria-expanded", "false");
+    const action = menuAction.dataset.menu;
+    if (action === "usage") openUsage();
+    if (action === "backup") downloadBackup();
+    if (action === "restore") $("#restore-file").click();
+    if (action === "theme") toggleTheme();
+    if (action === "help") openHelp();
+    if (action === "reset") resetWorkspace();
+    return;
+  }
+  if (!target.closest(".profile-wrap")) {
+    const menu = $("#profile-menu");
+    if (menu && !menu.hidden) {
+      menu.hidden = true;
+      $("#profile-button").setAttribute("aria-expanded", "false");
     }
   }
 });
 
+/* ---------------------------- forms -------------------------------- */
+
+$("#agent-branch").addEventListener("change", (event) => renderManagerOptions(event.target.value, "exec", $("#agent-id").value));
+
 $("#agent-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!stateReady) { toast("Workspace is not connected to the local server", true); return; }
+  if (!stateReady) {
+    toast("Workspace is not connected to the local server", true);
+    return;
+  }
   const form = new FormData(event.currentTarget);
   const id = $("#agent-id").value;
   const existing = agentById(id);
+  const selectedGrantConnectors = [...new Set($$('input[name="mcp-grant"]:checked').map((input) => input.dataset.connectorId))];
   const agent = {
-    id: id || `employee-${Date.now()}`,
-    name: String(form.get("name")).trim(),
-    role: String(form.get("role")).trim(),
-    branch: String(form.get("branch")),
+    id: id || newId("employee"),
+    name: String(form.get("name") || "").trim(),
+    role: String(form.get("role") || "").trim(),
+    branch: String(form.get("branch") || "").trim(),
     managerId: String(form.get("manager") || "exec"),
-    capabilities: String(form.get("capabilities") || "").split(",").map((item) => item.trim()).filter(Boolean),
+    capabilities: String(form.get("capabilities") || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean),
     status: String(form.get("status")),
     tools: $$('input[name="agent-tool"]:checked').map((input) => input.value),
-    mcpGrants: [...new Set($$('input[name="mcp-grant"]:checked').map((input) => input.dataset.connectorId))].map((connectorId) => ({ connectorId, tools: $$(`input[name="mcp-grant"][data-connector-id="${CSS.escape(connectorId)}"]:checked`).map((input) => input.value) })),
+    mcpGrants: selectedGrantConnectors
+      .map((connectorId) => ({
+        connectorId,
+        tools: $$(`input[name="mcp-grant"][data-connector-id="${CSS.escape(connectorId)}"]:checked`).map((input) => input.value),
+      }))
+      .filter((grant) => grant.tools.length),
   };
-  if (!agent.name || !agent.role) return;
+  if (!agent.name || !agent.role || !agent.branch) return;
   if (existing && existing.branch !== agent.branch && state.agents.some((employee) => employee.managerId === existing.id)) {
     toast("Reassign this employee’s reports before moving them to another branch", true);
     return;
   }
   const saved = await commitWorkspace(() => {
-    if (existing) Object.assign(existing, agent); else state.agents.push(agent);
+    if (existing) Object.assign(existing, agent);
+    else state.agents.push(agent);
     logActivity("tool", "✦", agent.name, existing ? "updated their employee profile in" : "was added as an employee in", agent.branch, "Local workspace · roster change");
   }, existing ? `${agent.name} updated` : `${agent.name} added to ${agent.branch}`);
   if (saved) $("#agent-dialog").close();
@@ -461,11 +1597,17 @@ $("#agent-form").addEventListener("submit", async (event) => {
 
 $("#tool-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!stateReady) { toast("Workspace is not connected to the local server", true); return; }
+  if (!stateReady) {
+    toast("Workspace is not connected to the local server", true);
+    return;
+  }
   const form = new FormData(event.currentTarget);
-  const name = String(form.get("name")).trim();
+  const name = String(form.get("name") || "").trim();
   if (!name) return;
-  if (state.tools.some((tool) => tool.name.toLowerCase() === name.toLowerCase())) { toast("That tool label already exists", true); return; }
+  if (state.tools.some((tool) => tool.name.toLowerCase() === name.toLowerCase())) {
+    toast("That tool label already exists", true);
+    return;
+  }
   const saved = await commitWorkspace(() => {
     state.tools.push({ name, category: String(form.get("category")), connected: true, glyph: initials(name).slice(0, 1), style: "" });
     logActivity("tool", "＋", "Workspace admin", "added a tool permission label for", name, "Local workspace · account not connected");
@@ -475,13 +1617,19 @@ $("#tool-form").addEventListener("submit", async (event) => {
 
 $("#mcp-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!stateReady) { toast("Workspace is not connected to the local server", true); return; }
+  if (!stateReady) {
+    toast("Workspace is not connected to the local server", true);
+    return;
+  }
   const id = $("#mcp-connector-id").value;
   const data = {
     label: $("#mcp-label").value.trim(),
     url: $("#mcp-url").value.trim(),
     description: $("#mcp-description").value.trim(),
-    allowedTools: $("#mcp-tools").value.split(/[\n,]/).map((name) => name.trim()).filter(Boolean),
+    allowedTools: $("#mcp-tools")
+      .value.split(/[\n,]/)
+      .map((name) => name.trim())
+      .filter(Boolean),
     enabled: $("#mcp-enabled").checked,
   };
   const token = $("#mcp-token").value;
@@ -492,44 +1640,141 @@ $("#mcp-form").addEventListener("submit", async (event) => {
 
 $("#task-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!stateReady) { $("#task-message").textContent = "The local Agent Factory server is unavailable."; return; }
+  if (!stateReady) {
+    setTaskMessage("The local Agent Factory server is unavailable.");
+    return;
+  }
   if (!gateway.configured) {
-    setGatewayStatus("MODEL GATEWAY NOT CONFIGURED", "offline");
+    updateGatewayChrome();
+    setTaskMessage("Configure the model gateway or start with AGENT_FACTORY_DEMO=1 before running a task.");
     return;
   }
   const prompt = $("#task-prompt").value.trim();
   if (!prompt) return;
   const button = $("#run-task-button");
+  startInFlight = true;
   button.disabled = true;
-  $("#task-message").textContent = "Executive is planning the task. Employee results will appear after the executive reviews them.";
-  try {
-    const response = await apiRequest("/api/workflows", { method: "POST", body: JSON.stringify({ prompt }) });
-    if (!response.task) throw new Error("The server returned no task result.");
-    await refreshWorkspace();
-    $("#task-prompt").value = "";
-    $("#task-message").textContent = response.pendingApproval
-      ? `Workflow paused: ${response.pendingApproval.employeeName} requested ${response.pendingApproval.toolName}. Review the exact arguments in Approvals.`
-      : response.task.status === "failed" ? `Task failed: ${response.task.summary || "check server and gateway status"}`
-      : response.task.status === "waiting_approval" ? "Workflow paused for MCP approval. Review the exact arguments in Approvals."
-      : "Task completed and saved to workspace history.";
-  } catch (error) {
-    await refreshWorkspace();
-    $("#task-message").textContent = `Task did not complete: ${error.message}`;
-    toast(error.message, true);
-  } finally {
-    button.disabled = !stateReady || !gateway.configured;
+  setTaskMessage("Executive is planning the task. Employee progress will stream below.");
+  const started = await startRun(prompt);
+  startInFlight = false;
+  button.disabled = !stateReady || !gateway.configured;
+  if (started) $("#task-prompt").value = "";
+});
+
+/* ---------------------------- misc --------------------------------- */
+
+async function removeAgent() {
+  if (!stateReady) {
+    toast("Workspace is not connected to the local server", true);
+    return;
+  }
+  const id = $("#agent-id").value;
+  const agent = agentById(id);
+  if (!agent) return;
+  const pending = state.approvals.filter((approval) => approval.agent === agent.name);
+  if (pending.length) {
+    toast("Resolve this employee’s pending approvals before removing them", true);
+    return;
+  }
+  if (state.tasks.some((task) => isActiveStatus(task.status) && (task.assignments || []).some((assignment) => assignment.employeeId === id))) {
+    toast("This employee is part of an active run. Cancel or finish it first.", true);
+    return;
+  }
+  if (state.agents.some((employee) => employee.managerId === agent.id)) {
+    toast("Reassign this employee’s reports before removing them", true);
+    return;
+  }
+  if (!window.confirm(`Remove ${agent.name} from the workspace?`)) return;
+  const removed = await commitWorkspace(() => {
+    state.agents = state.agents.filter((item) => item.id !== id);
+    logActivity("tool", "−", agent.name, "was removed from the employee roster in", agent.branch, "Local workspace · roster change");
+  }, `${agent.name} removed`);
+  if (removed) $("#agent-dialog").close();
+}
+
+document.addEventListener("keydown", (event) => {
+  const tag = event.target?.tagName?.toLowerCase();
+  const typing = tag === "input" || tag === "textarea" || tag === "select" || event.target?.isContentEditable;
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    if (!$("#palette-dialog").open) openPalette();
+    return;
+  }
+  if (event.key === "?" && !typing && !$("#palette-dialog").open) {
+    event.preventDefault();
+    openHelp();
+    return;
+  }
+  if (event.key === "Escape") {
+    const menu = $("#profile-menu");
+    if (menu && !menu.hidden) {
+      menu.hidden = true;
+      $("#profile-button").setAttribute("aria-expanded", "false");
+    }
   }
 });
 
-function exportReport() {
-  const rows = [["Name", "Role", "Branch", "Manager", "Capabilities", "Status", "Tool permission labels"], ...state.agents.map((agent) => [agent.name, agent.role, agent.branch, agent.managerId === "exec" ? executive.name : agentById(agent.managerId)?.name || executive.name, agent.capabilities.join("; "), agent.status, agent.tools.join("; ")])];
-  const csv = rows.map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(",")).join("\n");
-  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-  const anchor = document.createElement("a");
-  anchor.href = url; anchor.download = "agent-factory-demo-roster.csv"; anchor.click(); URL.revokeObjectURL(url);
-  toast("Workspace roster exported as CSV");
-}
+$("#palette-input").addEventListener("input", () => {
+  paletteIndex = 0;
+  renderPalette();
+});
 
-const date = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(new Date());
-$(".eyebrow").innerHTML = `<span class="eyebrow-line"></span>${escapeHtml(date.toUpperCase())}`;
+$("#palette-input").addEventListener("keydown", (event) => {
+  const items = filteredPaletteItems();
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    paletteIndex = Math.min(items.length - 1, paletteIndex + 1);
+    renderPalette();
+    $(".palette-item.selected")?.scrollIntoView({ block: "nearest" });
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    paletteIndex = Math.max(0, paletteIndex - 1);
+    renderPalette();
+    $(".palette-item.selected")?.scrollIntoView({ block: "nearest" });
+  } else if (event.key === "Enter") {
+    event.preventDefault();
+    runPaletteIndex(paletteIndex);
+  }
+});
+
+$("#palette-results").addEventListener("click", (event) => {
+  const item = event.target.closest("[data-palette-index]");
+  if (item) runPaletteIndex(Number(item.dataset.paletteIndex));
+});
+
+$("#palette-dialog").addEventListener("close", () => {
+  paletteItems = [];
+  paletteIndex = 0;
+});
+
+$("#run-filter").addEventListener("change", (event) => {
+  runFilter = event.target.value;
+  renderRuns();
+});
+
+$("#activity-filter").addEventListener("change", (event) => {
+  activityFilter = event.target.value;
+  showAllActivity = false;
+  renderActivity();
+});
+
+$("#restore-file").addEventListener("change", (event) => {
+  restoreBackup(event.target.files?.[0]);
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && stateReady) refreshWorkspace({ quiet: true });
+});
+
+window.addEventListener("beforeunload", () => {
+  if (live?.source) live.source.close();
+});
+
+/* ---------------------------- startup ------------------------------ */
+
+const today = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(new Date());
+$("#today-label").textContent = today.toUpperCase();
+updateThemeButton();
+render();
+updateGatewayChrome();
 refreshWorkspace();
