@@ -5,10 +5,13 @@ import { baseSeed } from "./helpers.mjs";
 
 test("validateState fills defaults and keeps schema version", () => {
   const state = validateState(baseSeed());
-  assert.equal(state.schemaVersion, 3);
+  assert.equal(state.schemaVersion, 4);
   assert.deepEqual(state.usage, { inputTokens: 0, outputTokens: 0, totalTokens: 0 });
   assert.equal(state.agents[0].mcpGrants.length, 0);
   assert.equal(state.executive.mcpGrants.length, 0);
+  assert.deepEqual(state.operator, { name: "Jordan Davis", role: "Workspace admin" });
+  assert.ok(state.branches.includes("San Francisco"));
+  assert.ok(state.branches.includes("Berlin"));
 });
 
 test("validateState derives usage from tasks when the workspace has no totals", () => {
@@ -65,6 +68,13 @@ test("validateState rejects duplicate employee and connector ids", () => {
     ],
   });
   assert.throws(() => validateState(duplicateConnectors), /unique/);
+});
+
+test("validateState requires branches used by employees to remain listed", () => {
+  const seed = baseSeed({ branches: ["Berlin"] });
+  assert.throws(() => validateState(seed), /still assigned/);
+  const withBranches = baseSeed({ branches: ["San Francisco", "Berlin"] });
+  assert.deepEqual(validateState(withBranches).branches, ["San Francisco", "Berlin"]);
 });
 
 test("validateState rejects grants outside the connector allow-list", () => {

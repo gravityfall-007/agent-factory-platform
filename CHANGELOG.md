@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.0 — company workspaces and editable operations
+
+- Add multiple company workspaces with a sidebar switcher, per-workspace employees, branches, tools, runs, approvals, usage, activity, connectors, and secrets.
+- Add workspace creation, rename, switch, and delete flows, including a first-run migration of the legacy single workspace into a `northstar` workspace.
+- Add company/workspace settings: company name, workspace label, operator name/role, and editable branch lists with validation against employee assignments.
+- Add an editable executive agent profile and editable/deletable tool catalog entries that update employee and executive references.
+- Add a “clear saved bearer token” control to connector editing.
+- Add workspace-scoped API routing (`X-Workspace-Id` header, `?workspace=` on SSE) and reset-with-empty-template behavior.
+- Add empty-workspace onboarding CTA, workspace-aware palette actions, and updates to help, README, and tests.
+
 ## 2.0.0 — operations console update
 
 ### Runs

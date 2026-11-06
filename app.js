@@ -58,6 +58,9 @@ let state = {
 let gateway = { configured: false, mode: "unconfigured", model: null, budget: 100000 };
 let stateReady = false;
 let backendOutdated = false;
+let workspaces = [];
+let workspaceId = "";
+let workspaceMeta = null;
 let selectedBranch = "all";
 let activityFilter = "all";
 let showAllActivity = false;
@@ -95,7 +98,8 @@ const branchClass = (branch) => {
 };
 
 function allBranches() {
-  const set = new Set(DEFAULT_BRANCHES);
+  const configured = Array.isArray(state.branches) && state.branches.length ? state.branches : DEFAULT_BRANCHES;
+  const set = new Set(configured);
   for (const agent of state.agents) if (agent.branch) set.add(agent.branch);
   return [...set];
 }
@@ -172,6 +176,7 @@ function agentStats(agentId) {
 
 async function apiRequest(path, options = {}) {
   const headers = { Accept: "application/json", ...(options.headers || {}) };
+  if (workspaceId) headers["X-Workspace-Id"] = workspaceId;
   if (options.body) headers["Content-Type"] = "application/json";
   let response;
   try {
@@ -257,16 +262,45 @@ function updateGatewayChrome() {
 async function refreshWorkspace({ quiet = false } = {}) {
   if (refreshPromise) return refreshPromise;
   refreshPromise = (async () => {
+    let knownDefault = "";
     try {
+      let list = { workspaces: [], defaultId: "" };
+      try {
+        list = await apiRequest("/api/workspaces");
+      } catch {
+        backendOutdated = true;
+      }
+      workspaces = Array.isArray(list.workspaces) ? list.workspaces : [];
+      knownDefault = list.defaultId || workspaces[0]?.id || "";
+      let stored = "";
+      try {
+        stored = localStorage.getItem("agent-factory-workspace") || "";
+      } catch {
+        stored = "";
+      }
+      if (!workspaceId) workspaceId = stored;
+      if (!workspaces.some((workspace) => workspace.id === workspaceId)) workspaceId = knownDefault;
+      workspaceMeta = workspaces.find((workspace) => workspace.id === workspaceId) || null;
+
       const [status, workspace, active] = await Promise.all([
         apiRequest("/api/status"),
         apiRequest("/api/state"),
         apiRequest("/api/runs/active").catch(() => ({ runs: [] })),
       ]);
       gateway = status;
-      backendOutdated = status.mode === undefined;
+      backendOutdated = backendOutdated || status.mode === undefined;
       state = workspace;
       executive = workspace.executive;
+      workspaces = list.workspaces;
+      workspaceMeta = workspace.workspace || workspaceMeta;
+      if (workspaceMeta) {
+        workspaceId = workspaceMeta.id;
+        try {
+          localStorage.setItem("agent-factory-workspace", workspaceId);
+        } catch {
+          /* ignore storage failures */
+        }
+      }
       stateReady = true;
       render();
       updateGatewayChrome();
@@ -274,6 +308,7 @@ async function refreshWorkspace({ quiet = false } = {}) {
       if (!live && active.runs.length) attachRun(pickActiveRun(active.runs).runId);
       return true;
     } catch (error) {
+      if (knownDefault && /workspace not found/i.test(error.message)) workspaceId = knownDefault;
       stateReady = false;
       gateway = { configured: false, mode: "unconfigured", model: null, budget: 100000 };
       updateGatewayChrome();
@@ -306,7 +341,39 @@ function render() {
   renderTools();
   renderConnectors();
   renderMetrics();
+  renderWorkspaceChrome();
   renderLive();
+}
+
+function renderWorkspaceChrome() {
+  const meta = workspaceMeta || state.workspace || { id: workspaceId, name: "Workspace", company: "" };
+  const operator = state.operator || { name: "Jordan Davis", role: "Workspace admin" };
+  const workspaceName = meta.name || "Workspace";
+  const company = meta.company || meta.name || "Local workspace";
+  $("#workspace-name").textContent = workspaceName;
+  $("#workspace-company").textContent = company;
+  $("#workspace-avatar").textContent = (initials(company).slice(0, 1) || "W");
+  $("#profile-name").textContent = operator.name;
+  $("#profile-role").textContent = operator.role;
+  $("#profile-avatar").textContent = initials(operator.name) || "OP";
+  $("#greeting-name").textContent = String(operator.name || "there").trim().split(/\s+/)[0] || "there";
+  document.title = `Agent Factory — ${company}`;
+  renderWorkspaceMenu();
+}
+
+function renderWorkspaceMenu() {
+  const host = $("#workspace-menu-list");
+  if (!host) return;
+  host.innerHTML = workspaces
+    .map((workspace) => {
+      const active = workspace.id === workspaceId;
+      return `<button type="button" role="menuitem" class="workspace-option ${active ? "active" : ""}" data-workspace-switch="${escapeHtml(workspace.id)}">
+        <span class="workspace-option-avatar">${escapeHtml((initials(workspace.company || workspace.name).slice(0, 1) || "W"))}</span>
+        <span class="workspace-option-copy"><strong>${escapeHtml(workspace.name)}</strong><small>${escapeHtml(workspace.company)}</small></span>
+        ${active ? '<span class="workspace-check" aria-label="Current workspace">✓</span>' : ""}
+      </button>`;
+    })
+    .join("");
 }
 
 function renderBranchList() {
@@ -350,11 +417,15 @@ function renderOrgChart() {
       </section>`;
     })
     .join("");
+  const emptyCta = state.agents.length
+    ? ""
+    : `<div class="org-empty"><div><strong>No employees yet</strong><p>This workspace is empty. Add your first specialist with a role, capabilities, tool labels, and optional MCP grants.</p></div><button class="button button-primary" type="button" data-add-first-employee><span aria-hidden="true">+</span> Create first employee</button></div>`;
   $("#org-chart").innerHTML = `<article class="ceo-card">
       <span class="agent-avatar ceo" aria-hidden="true">${escapeHtml(initials(executive.name))}</span>
       <span class="agent-info"><span class="agent-name-row"><span class="agent-name">${escapeHtml(executive.name)}</span><span class="ceo-label">EXECUTIVE</span></span><span class="agent-role">${escapeHtml(executive.role)} · coordinates all branches</span></span>
       <span class="agent-status">${executiveTools} labels</span>
-    </article><div class="org-branches">${branchCards}</div>`;
+      <button class="agent-edit ceo-edit" type="button" data-edit-executive aria-label="Edit the executive agent" title="Edit executive">✎</button>
+    </article>${emptyCta}<div class="org-branches">${branchCards}</div>`;
 }
 
 function renderApprovals() {
@@ -539,6 +610,7 @@ function renderTools() {
       <span class="tool-logo ${escapeHtml(tool.style)}" aria-hidden="true">${escapeHtml(tool.glyph)}</span>
       <span class="tool-copy"><strong>${escapeHtml(tool.name)}</strong><small>${escapeHtml(tool.category)} · not connected</small></span>
       <span class="tool-state ${tool.connected ? "" : "off"}">${tool.connected ? "Listed" : "Disabled"}</span>
+      <span class="tool-actions"><button class="tool-icon" type="button" data-edit-tool="${index}" aria-label="Edit ${escapeHtml(tool.name)} label" title="Edit label">✎</button><button class="tool-icon danger" type="button" data-delete-tool="${index}" aria-label="Delete ${escapeHtml(tool.name)} label" title="Delete label">×</button></span>
       <button class="toggle" type="button" role="switch" aria-checked="${tool.connected}" aria-label="${tool.connected ? "Disable" : "Enable"} ${escapeHtml(tool.name)} permission label; not connected" data-toggle-tool="${index}"></button>
     </div>`,
     )
@@ -646,7 +718,7 @@ function attachRun(runId) {
     scheduleRefresh();
     return;
   }
-  const source = new EventSource(`/api/runs/${encodeURIComponent(runId)}/events`);
+  const source = new EventSource(`/api/runs/${encodeURIComponent(runId)}/events?workspace=${encodeURIComponent(workspaceId)}`);
   live.source = source;
   for (const type of RUN_EVENT_TYPES) {
     source.addEventListener(type, (event) => {
@@ -1012,6 +1084,8 @@ function openConnectorDialog(connector = null) {
   $("#mcp-enabled").checked = connector?.enabled ?? true;
   $("#mcp-token").value = "";
   $("#mcp-token").placeholder = connector?.hasBearerToken ? "Saved token · leave blank to keep it" : "Optional bearer token";
+  $("#mcp-clear-token-row").hidden = !connector?.hasBearerToken;
+  $("#mcp-clear-token").checked = false;
   $("#mcp-dialog-title").textContent = connector ? "Edit MCP server" : "Add MCP server";
   $("#save-mcp-button").textContent = connector ? "Save changes" : "Save connector";
   $("#mcp-dialog").showModal();
@@ -1076,6 +1150,312 @@ function openHelp() {
   $("#help-dialog").showModal();
 }
 
+/* --------------------------- workspaces ---------------------------- */
+
+function blankState() {
+  const exec = { id: "exec", name: "Executive agent", role: "Executive agent · CEO", branch: "Executive", status: "active", tools: [] };
+  return {
+    executive: exec,
+    agents: [],
+    tools: [],
+    approvals: [],
+    activities: [],
+    tasks: [],
+    connectors: [],
+    branches: [],
+    operator: { name: "Operator", role: "Workspace admin" },
+    usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+  };
+}
+
+function parseBranches(value) {
+  return [...new Set(String(value || "").split(/[\n,]/).map((item) => item.trim()).filter(Boolean))];
+}
+
+function openWorkspaceDialog() {
+  if (backendOutdated) {
+    toast("Restart the server before creating a workspace", true);
+    return;
+  }
+  $("#workspace-form").reset();
+  const operator = state.operator || { name: "Jordan Davis" };
+  $("#new-workspace-company").value = "";
+  $("#new-workspace-name").value = "";
+  $("#new-workspace-operator").value = operator.name || "";
+  $("#new-workspace-executive").value = "Avery Morgan";
+  $("#new-workspace-role").value = "Executive agent · CEO";
+  $("#new-workspace-branches").value = (allBranches().length ? allBranches() : DEFAULT_BRANCHES).join("\n");
+  $("#workspace-menu").hidden = true;
+  $("#workspace-switcher").setAttribute("aria-expanded", "false");
+  $("#workspace-dialog").showModal();
+  $("#new-workspace-company").focus();
+}
+
+async function createWorkspace(event) {
+  event.preventDefault();
+  if (backendOutdated) {
+    toast("Restart the server before creating a workspace", true);
+    return;
+  }
+  const branches = parseBranches($("#new-workspace-branches").value);
+  if (!branches.length) {
+    toast("Add at least one branch", true);
+    return;
+  }
+  const button = $("#create-workspace-button");
+  button.disabled = true;
+  try {
+    const response = await apiRequest("/api/workspaces", {
+      method: "POST",
+      body: JSON.stringify({
+        company: $("#new-workspace-company").value.trim(),
+        name: $("#new-workspace-name").value.trim(),
+        operatorName: $("#new-workspace-operator").value.trim(),
+        executiveName: $("#new-workspace-executive").value.trim(),
+        executiveRole: $("#new-workspace-role").value.trim(),
+        branches,
+      }),
+    });
+    workspaces = response.workspaces || workspaces;
+    $("#workspace-dialog").close();
+    await switchWorkspace(response.workspace.id, { force: true, announce: false });
+    toast(`${response.workspace.company} workspace created`);
+  } catch (error) {
+    toast(`Workspace was not created. ${error.message}`, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function switchWorkspace(id, { force = false, announce = true } = {}) {
+  if (!id || id === workspaceId) {
+    $("#workspace-menu").hidden = true;
+    $("#workspace-switcher").setAttribute("aria-expanded", "false");
+    return;
+  }
+  if (live && !live.terminal && !force) {
+    if (!window.confirm("A run is active in this workspace. Switch anyway? The run continues in the background.")) return;
+  }
+  const next = workspaces.find((workspace) => workspace.id === id);
+  detachRun();
+  workspaceId = id;
+  workspaceMeta = next || null;
+  try {
+    localStorage.setItem("agent-factory-workspace", id);
+  } catch {
+    /* ignore */
+  }
+  selectedBranch = "all";
+  activityFilter = "all";
+  showAllActivity = false;
+  runFilter = "all";
+  expandedRuns.clear();
+  stateReady = false;
+  state = blankState();
+  executive = state.executive;
+  $("#workspace-menu").hidden = true;
+  $("#workspace-switcher").setAttribute("aria-expanded", "false");
+  $("#run-filter").value = "all";
+  $("#activity-filter").value = "all";
+  render();
+  if (refreshPromise) await refreshPromise.catch(() => {});
+  const ok = await refreshWorkspace({ quiet: true });
+  if (ok && announce) toast(`Switched to ${workspaceMeta?.name || next?.name || "workspace"}`);
+}
+
+function openSettingsDialog() {
+  if (backendOutdated) {
+    toast("Restart the server to edit workspace settings", true);
+    return;
+  }
+  const meta = workspaceMeta || state.workspace || { name: "", company: "" };
+  const operator = state.operator || { name: "", role: "Workspace admin" };
+  $("#settings-company").value = meta.company || "";
+  $("#settings-name").value = meta.name || "";
+  $("#settings-operator").value = operator.name || "";
+  $("#settings-operator-role").value = operator.role || "";
+  $("#settings-branches").value = (allBranches().length ? allBranches() : DEFAULT_BRANCHES).join("\n");
+  $("#delete-workspace-button").hidden = workspaces.length <= 1;
+  $("#workspace-menu").hidden = true;
+  $("#workspace-switcher").setAttribute("aria-expanded", "false");
+  $("#settings-dialog").showModal();
+  $("#settings-company").focus();
+}
+
+async function saveSettings(event) {
+  event.preventDefault();
+  if (!stateReady) {
+    toast("Workspace is not loaded", true);
+    return;
+  }
+  const branches = parseBranches($("#settings-branches").value);
+  if (!branches.length) {
+    toast("Add at least one branch", true);
+    return;
+  }
+  const missing = state.agents.filter((agent) => !branches.includes(agent.branch));
+  if (missing.length) {
+    toast(`Move ${missing[0].name} out of “${missing[0].branch}” before removing that branch`, true);
+    return;
+  }
+  const name = $("#settings-name").value.trim();
+  const company = $("#settings-company").value.trim();
+  if (!name || !company) {
+    toast("Workspace and company names are required", true);
+    return;
+  }
+  const operator = { name: $("#settings-operator").value.trim(), role: $("#settings-operator-role").value.trim() };
+  if (!operator.name || !operator.role) {
+    toast("Operator name and role are required", true);
+    return;
+  }
+  const saved = await commitWorkspace(() => {
+    state.branches = branches;
+    state.operator = operator;
+    logActivity("tool", "⚙", operator.name, "updated workspace settings for", company, "Local workspace · company settings");
+  }, "Workspace settings saved");
+  if (!saved) return;
+  try {
+    const response = await apiRequest(`/api/workspaces/${encodeURIComponent(workspaceId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ name, company }),
+    });
+    workspaceMeta = response.workspace;
+    workspaces = response.workspaces || workspaces;
+    renderWorkspaceChrome();
+    $("#settings-dialog").close();
+    toast(`${company} workspace updated`);
+  } catch (error) {
+    toast(`Workspace name was not updated. ${error.message}`, true);
+  }
+}
+
+async function deleteWorkspace() {
+  if (!workspaceMeta) return;
+  if (workspaces.length <= 1) {
+    toast("Keep at least one workspace", true);
+    return;
+  }
+  if (!window.confirm(`Delete the “${workspaceMeta.name}” workspace?
+
+Employees, runs, approvals, and connector tokens for ${workspaceMeta.company} will be removed. This cannot be undone.`)) return;
+  try {
+    const response = await apiRequest(`/api/workspaces/${encodeURIComponent(workspaceId)}`, { method: "DELETE" });
+    workspaces = response.workspaces || [];
+    $("#settings-dialog").close();
+    detachRun();
+    workspaceId = "";
+    try {
+      localStorage.removeItem("agent-factory-workspace");
+    } catch {
+      /* ignore */
+    }
+    await switchWorkspace(response.defaultId, { force: true, announce: false });
+    toast("Workspace deleted");
+  } catch (error) {
+    toast(`Workspace was not deleted. ${error.message}`, true);
+  }
+}
+
+function openExecutiveDialog() {
+  $("#executive-form").reset();
+  $("#executive-name").value = executive.name || "";
+  $("#executive-role").value = executive.role || "";
+  $("#executive-status").value = executive.status || "active";
+  $("#executive-tool-options").innerHTML = state.tools.length
+    ? state.tools
+        .map(
+          (tool) => `<label class="tool-option"><input type="checkbox" name="executive-tool" value="${escapeHtml(tool.name)}" ${executive.tools?.includes(tool.name) ? "checked" : ""}><span>${escapeHtml(tool.name)}${tool.connected ? "" : " · disabled"}</span></label>`,
+        )
+        .join("")
+    : '<small class="field-hint">No tool labels yet. Add one under Integrations.</small>';
+  $("#executive-dialog").showModal();
+  $("#executive-name").focus();
+}
+
+async function saveExecutive(event) {
+  event.preventDefault();
+  const name = $("#executive-name").value.trim();
+  const role = $("#executive-role").value.trim();
+  if (!name || !role) return;
+  const tools = $$('input[name="executive-tool"]:checked').map((input) => input.value);
+  const saved = await commitWorkspace(() => {
+    executive.name = name;
+    executive.role = role;
+    executive.status = $("#executive-status").value;
+    executive.tools = tools;
+    state.executive = executive;
+    logActivity("tool", "✦", name, "updated the executive agent profile for", workspaceMeta?.company || "the workspace", "Local workspace · executive change");
+  }, "Executive agent updated");
+  if (saved) $("#executive-dialog").close();
+}
+
+function openToolDialog(tool = null) {
+  $("#tool-form").reset();
+  $("#tool-original-name").value = tool?.name || "";
+  $("#tool-name").value = tool?.name || "";
+  const select = $("#tool-category");
+  if (tool?.category && ![...select.options].some((option) => option.value === tool.category)) {
+    select.add(new Option(tool.category, tool.category));
+  }
+  if (tool?.category) select.value = tool.category;
+  $("#tool-dialog-title").textContent = tool ? "Edit tool label" : "Add a tool label";
+  $("#save-tool-button").textContent = tool ? "Save label" : "Add tool label";
+  $("#tool-dialog").showModal();
+  $("#tool-name").focus();
+}
+
+async function saveTool(event) {
+  event.preventDefault();
+  const name = $("#tool-name").value.trim();
+  const category = $("#tool-category").value;
+  const original = $("#tool-original-name").value;
+  if (!name) return;
+  const duplicate = state.tools.find((tool) => tool.name.toLowerCase() === name.toLowerCase() && tool.name !== original);
+  if (duplicate) {
+    toast("That tool label already exists", true);
+    return;
+  }
+  const existing = original ? state.tools.find((tool) => tool.name === original) : null;
+  if (original && !existing) {
+    toast("That tool label no longer exists", true);
+    return;
+  }
+  const saved = await commitWorkspace(() => {
+    if (existing) {
+      if (original !== name) {
+        executive.tools = (executive.tools || []).map((item) => (item === original ? name : item));
+        state.executive = executive;
+        for (const agent of state.agents) agent.tools = agent.tools.map((item) => (item === original ? name : item));
+      }
+      existing.name = name;
+      existing.category = category;
+      logActivity("tool", "✎", state.operator?.name || "Workspace admin", "edited a tool permission label for", name, "Local workspace · account not connected");
+    } else {
+      state.tools.push({ name, category, connected: true, glyph: initials(name).slice(0, 1), style: "" });
+      logActivity("tool", "＋", state.operator?.name || "Workspace admin", "added a tool permission label for", name, "Local workspace · account not connected");
+    }
+  }, existing ? `${name} label updated` : `${name} permission label added`);
+  if (saved) $("#tool-dialog").close();
+}
+
+async function deleteTool(index) {
+  const tool = state.tools[index];
+  if (!tool) return;
+  const employeeUses = state.agents.filter((agent) => agent.tools.includes(tool.name)).length + (executive.tools?.includes(tool.name) ? 1 : 0);
+  if (!window.confirm(`Delete the “${tool.name}” label?${employeeUses ? `\n\nIt is assigned to ${employeeUses} profile${employeeUses === 1 ? "" : "s"}; those assignments will be removed.` : ""}`)) return;
+  const saved = await commitWorkspace(() => {
+    state.tools = state.tools.filter((item) => item.name !== tool.name);
+    if (executive.tools) {
+      executive.tools = executive.tools.filter((item) => item !== tool.name);
+      state.executive = executive;
+    }
+    for (const agent of state.agents) agent.tools = agent.tools.filter((item) => item !== tool.name);
+    logActivity("tool", "−", state.operator?.name || "Workspace admin", "deleted the tool permission label", tool.name, "Local workspace · account not connected");
+  }, `${tool.name} label deleted`);
+  if (saved) render();
+}
+
 /* ------------------------------ theme ------------------------------ */
 
 function currentTheme() {
@@ -1133,19 +1513,22 @@ function buildPaletteItems() {
     }),
     paletteAction("Create employee", "Add a digital employee", "Actions", () => openAgentDialog()),
     paletteAction("Add MCP server", "Register a remote tool server", "Actions", () => openConnectorDialog()),
-    paletteAction("Add tool label", "Add a permission label", "Actions", () => {
-      $("#tool-form").reset();
-      $("#tool-dialog").showModal();
-      $("#tool-name").focus();
-    }),
+    paletteAction("Add tool label", "Add a permission label", "Actions", () => openToolDialog()),
+    paletteAction("New company workspace", "Create a separate workspace for another company", "Workspaces", () => openWorkspaceDialog()),
+    paletteAction("Workspace settings", "Rename the company/workspace, branches, and operator", "Workspaces", () => openSettingsDialog()),
+    paletteAction("Edit executive agent", "Change the planner's name, role, and labels", "Workspaces", () => openExecutiveDialog()),
     paletteAction("Export roster CSV", "Download employees and grants", "Actions", () => exportRoster()),
     paletteAction("Download workspace backup", "JSON backup without connector tokens", "Actions", () => downloadBackup()),
     paletteAction("Restore workspace backup", "Load a previously downloaded JSON file", "Actions", () => $("#restore-file").click()),
     paletteAction("Usage report", "Measured token usage", "Actions", () => openUsage()),
     paletteAction("Switch theme", "Toggle light and dark appearance", "Actions", () => toggleTheme()),
     paletteAction("Help & shortcuts", "Operator guide", "Actions", () => openHelp()),
-    paletteAction("Reset demo workspace", "Restore seed employees, approvals, and history", "Danger", () => resetWorkspace()),
+    paletteAction("Reset workspace data", "Clear employees, runs, approvals, and activity", "Danger", () => resetWorkspace()),
   );
+  for (const workspace of workspaces) {
+    if (workspace.id === workspaceId) continue;
+    items.push(paletteAction(`Switch to ${workspace.name}`, workspace.company, "Workspaces", () => switchWorkspace(workspace.id)));
+  }
   for (const agent of state.agents) {
     const stats = agentStats(agent.id);
     items.push(paletteAction(`Edit ${agent.name}`, `${agent.role} · ${agent.branch} · ${plural(stats.runs, "run")}`, "Employees", () => openAgentDialog(agent)));
@@ -1235,13 +1618,14 @@ async function downloadBackup() {
     return;
   }
   try {
-    const response = await fetch("/api/workspace/backup", { credentials: "same-origin" });
+    const response = await fetch("/api/workspace/backup", { credentials: "same-origin", headers: workspaceId ? { "X-Workspace-Id": workspaceId } : {} });
     if (!response.ok) throw new Error(`Backup failed (${response.status})`);
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `agent-factory-workspace-${new Date().toISOString().slice(0, 10)}.json`;
+    const companySlug = String(workspaceMeta?.company || "workspace").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "workspace";
+    anchor.download = `agent-factory-${companySlug}-${new Date().toISOString().slice(0, 10)}.json`;
     anchor.click();
     URL.revokeObjectURL(url);
     toast("Workspace backup downloaded (connector tokens are not included)");
@@ -1278,12 +1662,12 @@ async function resetWorkspace() {
     toast("Restart the server to enable workspace reset", true);
     return;
   }
-  if (!window.confirm("Reset this workspace to the seed demo data? Runs, approvals, employees, and connector tokens will be replaced.")) return;
+  if (!window.confirm("Clear all employees, runs, approvals, activity, connectors, and tokens from this workspace?\n\nThe company name, executive agent, branches, operator, and tool catalog are kept.")) return;
   try {
     detachRun();
-    await apiRequest("/api/workspace/reset", { method: "POST" });
+    await apiRequest("/api/workspace/reset", { method: "POST", body: JSON.stringify({ template: "empty" }) });
     await refreshWorkspace({ quiet: true });
-    toast("Demo workspace reset");
+    toast("Workspace data cleared");
   } catch (error) {
     toast(`Workspace was not reset. ${error.message}`, true);
   }
@@ -1297,6 +1681,14 @@ document.addEventListener("click", async (event) => {
   const editAgent = target.closest("[data-edit-agent]");
   if (editAgent) {
     openAgentDialog(agentById(editAgent.dataset.editAgent));
+    return;
+  }
+  if (target.closest("[data-edit-executive]")) {
+    openExecutiveDialog();
+    return;
+  }
+  if (target.closest("[data-add-first-employee]")) {
+    openAgentDialog();
     return;
   }
 
@@ -1366,6 +1758,17 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const editTool = target.closest("[data-edit-tool]");
+  if (editTool) {
+    openToolDialog(state.tools[Number(editTool.dataset.editTool)]);
+    return;
+  }
+  const deleteToolButton = target.closest("[data-delete-tool]");
+  if (deleteToolButton) {
+    await deleteTool(Number(deleteToolButton.dataset.deleteTool));
+    return;
+  }
+
   const toggleTool = target.closest("[data-toggle-tool]");
   if (toggleTool) {
     const tool = state.tools[Number(toggleTool.dataset.toggleTool)];
@@ -1373,7 +1776,7 @@ document.addEventListener("click", async (event) => {
       const enabled = !tool.connected;
       await commitWorkspace(() => {
         tool.connected = enabled;
-        logActivity("tool", "↔", "Workspace admin", `${enabled ? "enabled" : "disabled"} a permission label for`, tool.name, "Local workspace · account not connected");
+        logActivity("tool", "↔", state.operator?.name || "Workspace admin", `${enabled ? "enabled" : "disabled"} a permission label for`, tool.name, "Local workspace · account not connected");
       }, `${tool.name} permission label ${enabled ? "enabled" : "disabled"}`);
     }
     return;
@@ -1389,9 +1792,7 @@ document.addEventListener("click", async (event) => {
       toast("Workspace is not connected to the local server", true);
       return;
     }
-    $("#tool-form").reset();
-    $("#tool-dialog").showModal();
-    $("#tool-name").focus();
+    openToolDialog();
     return;
   }
   if (target.closest("#add-mcp-connector")) {
@@ -1421,7 +1822,7 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (target.closest("#approvals-more")) {
-    toast("Local review examples and pending MCP calls appear here. Resolved decisions stay in activity history.");
+    openHelp();
     return;
   }
   if (target.closest("#view-all-agents")) {
@@ -1520,18 +1921,42 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  if (target.closest("#workspace-switcher")) {
+    const menu = $("#workspace-menu");
+    const hidden = menu.hidden;
+    menu.hidden = !hidden;
+    $("#workspace-switcher").setAttribute("aria-expanded", String(hidden));
+    $("#profile-menu").hidden = true;
+    $("#profile-button").setAttribute("aria-expanded", "false");
+    return;
+  }
+  const workspaceOption = target.closest("[data-workspace-switch]");
+  if (workspaceOption) {
+    await switchWorkspace(workspaceOption.dataset.workspaceSwitch);
+    return;
+  }
+  if (target.closest("#delete-workspace-button")) {
+    await deleteWorkspace();
+    return;
+  }
   if (target.closest("#profile-button")) {
     const menu = $("#profile-menu");
     const hidden = menu.hidden;
     menu.hidden = !hidden;
     $("#profile-button").setAttribute("aria-expanded", String(hidden));
+    $("#workspace-menu").hidden = true;
+    $("#workspace-switcher").setAttribute("aria-expanded", "false");
     return;
   }
   const menuAction = target.closest("[data-menu]");
   if (menuAction) {
     $("#profile-menu").hidden = true;
     $("#profile-button").setAttribute("aria-expanded", "false");
+    $("#workspace-menu").hidden = true;
+    $("#workspace-switcher").setAttribute("aria-expanded", "false");
     const action = menuAction.dataset.menu;
+    if (action === "new-workspace") openWorkspaceDialog();
+    if (action === "workspace-settings") openSettingsDialog();
     if (action === "usage") openUsage();
     if (action === "backup") downloadBackup();
     if (action === "restore") $("#restore-file").click();
@@ -1545,6 +1970,13 @@ document.addEventListener("click", async (event) => {
     if (menu && !menu.hidden) {
       menu.hidden = true;
       $("#profile-button").setAttribute("aria-expanded", "false");
+    }
+  }
+  if (!target.closest(".workspace-wrap")) {
+    const menu = $("#workspace-menu");
+    if (menu && !menu.hidden) {
+      menu.hidden = true;
+      $("#workspace-switcher").setAttribute("aria-expanded", "false");
     }
   }
 });
@@ -1595,25 +2027,7 @@ $("#agent-form").addEventListener("submit", async (event) => {
   if (saved) $("#agent-dialog").close();
 });
 
-$("#tool-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (!stateReady) {
-    toast("Workspace is not connected to the local server", true);
-    return;
-  }
-  const form = new FormData(event.currentTarget);
-  const name = String(form.get("name") || "").trim();
-  if (!name) return;
-  if (state.tools.some((tool) => tool.name.toLowerCase() === name.toLowerCase())) {
-    toast("That tool label already exists", true);
-    return;
-  }
-  const saved = await commitWorkspace(() => {
-    state.tools.push({ name, category: String(form.get("category")), connected: true, glyph: initials(name).slice(0, 1), style: "" });
-    logActivity("tool", "＋", "Workspace admin", "added a tool permission label for", name, "Local workspace · account not connected");
-  }, `${name} permission label added`);
-  if (saved) $("#tool-dialog").close();
-});
+$("#tool-form").addEventListener("submit", saveTool);
 
 $("#mcp-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1634,6 +2048,7 @@ $("#mcp-form").addEventListener("submit", async (event) => {
   };
   const token = $("#mcp-token").value;
   if (token) data.bearerToken = token;
+  if ($("#mcp-clear-token").checked) data.clearBearerToken = true;
   $("#mcp-token").value = "";
   await saveConnector(data, !id);
 });
@@ -1769,6 +2184,10 @@ document.addEventListener("visibilitychange", () => {
 window.addEventListener("beforeunload", () => {
   if (live?.source) live.source.close();
 });
+
+$("#workspace-form").addEventListener("submit", createWorkspace);
+$("#settings-form").addEventListener("submit", saveSettings);
+$("#executive-form").addEventListener("submit", saveExecutive);
 
 /* ---------------------------- startup ------------------------------ */
 

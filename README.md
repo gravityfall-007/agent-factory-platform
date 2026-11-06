@@ -1,6 +1,6 @@
 # Agent Factory
 
-Agent Factory is a local operations console for a model-backed digital workforce. An executive agent plans a task, delegates work to branch employees, pauses on external tool calls for a human decision, and synthesizes the results. Runs, approvals, usage, and history are persisted locally.
+Agent Factory is a local operations console for one or more company workspaces with a model-backed digital workforce. Each company gets its own executive agent, employees, branches, tool catalog, approvals, run history, usage, and connector tokens. An executive agent plans a task, delegates work to branch employees, pauses on external tool calls for a human decision, and synthesizes the results.
 
 The console is designed for one operator on one machine. It has no login, tenant isolation, or billing, and it binds to loopback by default.
 
@@ -11,7 +11,9 @@ The console is designed for one operator on one machine. It has no login, tenant
 - **Run history** — every run persists its plan, assignment results, per-run usage, status, and a bounded event timeline. Filter by status, expand a run, or download/restore the workspace.
 - **Measured usage** — provider-reported tokens per run and assignment, a configurable local budget, and a usage report by employee and run.
 - **Demo mode** — run the entire product without a gateway key. Every model and tool call is simulated, deterministic, clearly labeled, and makes no network requests.
-- **Operator conveniences** — command palette (`Ctrl`/`⌘ + K`), light/dark themes, CSV roster export, JSON backup/restore, and a reset to seed data.
+- **Company workspaces** — create a clean workspace for another company, switch between them, rename the company/workspace, manage branches and the operator profile, and delete a workspace without touching the others.
+- **Editable everywhere** — employee roles, managers, capabilities, availability, tool labels, MCP grants, executive profile, tool catalog entries, branch lists, company names, and operator profile all have working edit flows.
+- **Operator conveniences** — command palette (`Ctrl`/`⌘ + K`), light/dark themes, CSV roster export, JSON backup/restore, and a reset that can clear a workspace while keeping its company identity.
 - **Hardened local API** — loopback Host enforcement, same-origin + JSON mutation checks, strict CSP, atomic persistence, connector URL policy, and bounded inputs.
 
 ## Quick start
@@ -40,6 +42,17 @@ node server.mjs
 The gateway must accept the OpenAI **Responses API** format. The server sends model requests from the server process to that gateway; the browser only calls same-origin `/api` routes, and the API key is never returned to the browser.
 
 Demo mode takes precedence over live mode when both are configured.
+
+## Company workspaces
+
+The switcher at the top of the sidebar lists every company workspace and opens the create/settings flows.
+
+- **Create** — choose a company name, workspace label, executive name/role, operator name, and branches. The new workspace starts empty with the shared tool catalog and no employees, approvals, runs, or tokens.
+- **Switch** — each workspace has isolated employees, tools, branches, runs, approvals, usage, and connector tokens. Switching does not stop runs; they continue on the server and can be reopened from run history or the live panel when you switch back.
+- **Settings** — rename the company/workspace, edit the operator profile, add or remove branches (blocked while an employee is assigned to the branch), or delete the workspace. At least one workspace must remain.
+- **Editable executive/tools** — edit the executive from the pencil button on its card; edit or delete tool labels from the catalog. Renaming a tool label updates every employee and executive reference.
+
+Workspace-scoped requests carry an `X-Workspace-Id` header. SSE URLs use `?workspace=<id>` because `EventSource` cannot set custom headers. The active workspace is remembered per browser.
 
 ## Configuration
 
@@ -76,7 +89,11 @@ All routes are same-origin and return JSON unless noted.
 | Method | Route | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/status` | Gateway mode, model, format, and budget. |
-| `GET` | `/api/state` | Full workspace state plus connector token presence flags. |
+| `GET` | `/api/workspaces` | List company workspaces and the default ID. |
+| `POST` | `/api/workspaces` | Create a company workspace. |
+| `PUT` | `/api/workspaces/:id` | Rename a workspace/company. |
+| `DELETE` | `/api/workspaces/:id` | Delete a workspace with no active runs (last one is protected). |
+| `GET` | `/api/state` | Full workspace state plus connector token presence flags and workspace metadata. |
 | `PUT` | `/api/state` | Save roster/tools/activities. Server-owned runs, usage, and MCP approvals are preserved. |
 | `POST` | `/api/workflows` | Start a run (`202`). |
 | `GET` | `/api/runs/active` | Queued, running, and waiting runs. |
@@ -90,7 +107,7 @@ All routes are same-origin and return JSON unless noted.
 | `POST` | `/api/workspace/reset` | Restore seed data with no active runs. |
 | `GET` | `/api/health` | Liveness check. |
 
-Mutating requests require `Content-Type: application/json` and a same-origin browser context. Requests addressed to a non-loopback `Host` are rejected unless it is listed in `AGENT_FACTORY_ALLOWED_HOSTS`.
+Workspace-scoped API routes accept `X-Workspace-Id`; requests without it use the default workspace. Mutating requests require `Content-Type: application/json` and a same-origin browser context. Requests addressed to a non-loopback `Host` are rejected unless it is listed in `AGENT_FACTORY_ALLOWED_HOSTS`.
 
 ## Security and privacy boundary
 
@@ -116,6 +133,7 @@ The suite uses temporary data directories, a deterministic demo gateway, and fak
 - `server.mjs` — process entry point and graceful shutdown.
 - `lib/app.mjs` — HTTP routing, SSE streams, static files, origin/host checks.
 - `lib/workflow.mjs` — run lifecycle, delegation, approvals, cancellation, recovery.
+- `lib/workspaces.mjs` — company workspace registry, migration, isolation, create/rename/delete.
 - `lib/gateway.mjs` — live Responses client, demo gateway, usage extraction.
 - `lib/store.mjs` — atomic workspace, secret, and pending-approval persistence.
 - `lib/core.mjs` — limits, errors, and workspace validation.
@@ -128,15 +146,18 @@ The suite uses temporary data directories, a deterministic demo gateway, and fak
 
 | File | Contents | Permissions |
 | --- | --- | --- |
-| `data/workspace.json` | Executive, employees, tools, connectors, approvals, activity, runs, usage | `0600` |
-| `data/connector-secrets.json` | Connector bearer tokens | `0600` |
-| `data/pending-approvals.json` | Resumable model approval state | `0600` |
+| `data/workspaces.json` | Company workspace registry and default workspace | `0600` |
+| `data/workspaces/<id>/workspace.json` | Executive, employees, branches, operator, tools, connectors, approvals, activity, runs, usage | `0600` |
+| `data/workspaces/<id>/connector-secrets.json` | Connector bearer tokens for that workspace | `0600` |
+| `data/workspaces/<id>/pending-approvals.json` | Resumable model approval state for that workspace | `0600` |
+
+A legacy single-workspace `data/workspace.json` is copied into the default `northstar` workspace on first start and left in place for reference; it is not modified after migration.
 
 Use the profile menu or the API to download a workspace backup. Restoring a backup clears connector tokens and pending approvals; re-enter tokens afterward.
 
 ## Known limitations
 
-- One process, one workspace, one operator. No authentication, tenants, or roles.
+- One process and one operator. Company workspaces are isolated data, not authenticated tenants; anyone who can reach the port can switch or edit any workspace. No roles or user accounts.
 - Remote MCP calls depend on the gateway's Responses API MCP support and on the model choosing a granted tool.
 - Approval state is tied to the gateway's stored response; a provider-side expiry can require a new run.
 - Runs interrupted by a restart are marked failed. Completed totals remain, but mid-run tokens are not recovered.

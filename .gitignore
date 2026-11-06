@@ -8,3 +8,5 @@ node_modules/
 data/connector-secrets.json
 data/pending-approvals.json
 data/*.tmp
+data/workspaces.json
+data/workspaces/

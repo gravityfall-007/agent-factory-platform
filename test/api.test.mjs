@@ -98,7 +98,7 @@ test("API serves status, state, static files, and security headers", async () =>
     assert.deepEqual(health.payload, { ok: true });
 
     const state = await ctx.state();
-    assert.equal(state.schemaVersion, 3);
+    assert.equal(state.schemaVersion, 4);
     assert.equal(state.agents.length, 2);
     assert.equal(state.usage.totalTokens, 0);
 
@@ -343,6 +343,145 @@ test("backup, restore, and reset round-trip the workspace", async () => {
     assert.equal(state.tasks.length, 0);
     assert.equal(state.usage.totalTokens, 0);
     assert.equal(state.agents.length, 2);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("company workspaces are isolated and support create, rename, switch, and delete", async () => {
+  const ctx = await boot();
+  try {
+    const initial = await ctx.json("/api/workspaces");
+    assert.equal(initial.response.status, 200);
+    assert.equal(initial.payload.workspaces.length, 1);
+    const defaultId = initial.payload.defaultId;
+
+    const created = await ctx.json("/api/workspaces", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        company: "Acme Corporation",
+        name: "Acme Ops",
+        executiveName: "Alex Rivera",
+        executiveRole: "Executive agent · COO",
+        operatorName: "Alex Doe",
+        branches: ["London", "New York"],
+      }),
+    });
+    assert.equal(created.response.status, 201);
+    const acme = created.payload.workspace;
+    assert.equal(acme.company, "Acme Corporation");
+    assert.equal(created.payload.state.agents.length, 0);
+    assert.deepEqual(created.payload.state.branches, ["London", "New York"]);
+    assert.equal(created.payload.state.executive.name, "Alex Rivera");
+
+    const headers = { "X-Workspace-Id": acme.id };
+    const acmeState = await (await fetch(`${ctx.base}/api/state`, { headers })).json();
+    assert.equal(acmeState.agents.length, 0);
+    acmeState.agents.push({
+      id: "london-1",
+      name: "Priya Shah",
+      role: "Operations Lead",
+      branch: "London",
+      managerId: "exec",
+      capabilities: ["vendor management"],
+      status: "active",
+      tools: ["Slack"],
+      mcpGrants: [],
+    });
+    const saved = await fetch(`${ctx.base}/api/state`, {
+      method: "PUT",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify(acmeState),
+    });
+    assert.equal(saved.status, 200);
+    const defaultState = await (await fetch(`${ctx.base}/api/state`, { headers: { "X-Workspace-Id": defaultId } })).json();
+    assert.equal(defaultState.agents.length, 2);
+    assert.equal((await (await fetch(`${ctx.base}/api/state`, { headers })).json()).agents.length, 1);
+
+    const renamed = await ctx.json(`/api/workspaces/${acme.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Acme HQ", company: "Acme Corporation" }),
+    });
+    assert.equal(renamed.response.status, 200);
+    assert.equal(renamed.payload.workspace.name, "Acme HQ");
+
+    const run = await fetch(`${ctx.base}/api/workflows`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: "Plan the London launch" }),
+    });
+    assert.equal(run.status, 202);
+    const runBody = await run.json();
+    const completed = await waitFor(
+      async () => {
+        const state = await (await fetch(`${ctx.base}/api/state`, { headers })).json();
+        return state.tasks.find((item) => item.id === runBody.runId)?.status === "done" ? state : null;
+      },
+      { label: "workspace run completion" },
+    );
+    assert.equal(completed.tasks.length, 1);
+    assert.equal(completed.usage.totalTokens > 0, true);
+
+    const removed = await ctx.json(`/api/workspaces/${acme.id}`, { method: "DELETE" });
+    assert.equal(removed.response.status, 200);
+    assert.equal(removed.payload.workspaces.length, 1);
+    assert.equal(removed.payload.workspaces[0].id, defaultId);
+    const missing = await ctx.json("/api/state", { headers });
+    assert.equal(missing.response.status, 404);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("workspace settings validation and empty reset preserve company identity", async () => {
+  const ctx = await boot();
+  try {
+    const created = await ctx.json("/api/workspaces", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ company: "Initech", name: "Initech Ops", branches: ["Austin"] }),
+    });
+    const workspace = created.payload.workspace;
+    const headers = { "X-Workspace-Id": workspace.id };
+    const state = await (await fetch(`${ctx.base}/api/state`, { headers })).json();
+    state.agents.push({
+      id: "austin-1",
+      name: "Peter Gibbons",
+      role: "Engineer",
+      branch: "Austin",
+      managerId: "exec",
+      capabilities: [],
+      status: "active",
+      tools: [],
+      mcpGrants: [],
+    });
+    assert.equal((await fetch(`${ctx.base}/api/state`, { method: "PUT", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(state) })).status, 200);
+
+    const badBranches = await (await fetch(`${ctx.base}/api/state`, {
+      method: "PUT",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ ...state, branches: ["Dallas"] }),
+    })).json();
+    assert.match(badBranches.error, /still assigned/);
+
+    const reset = await ctx.json("/api/workspace/reset", {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ template: "empty" }),
+    });
+    assert.equal(reset.response.status, 200);
+    const resetState = await (await fetch(`${ctx.base}/api/state`, { headers })).json();
+    assert.equal(resetState.agents.length, 0);
+    assert.deepEqual(resetState.branches, ["Austin"]);
+    assert.equal(resetState.workspace.company, "Initech");
+    assert.equal(resetState.workspace.name, "Initech Ops");
+
+    const last = await (await fetch(`${ctx.base}/api/workspaces/${workspace.id}`, { method: "DELETE" })).json();
+    assert.equal(last.workspaces.length, 1);
+    const lastDelete = await fetch(`${ctx.base}/api/workspaces/${last.workspaces[0].id}`, { method: "DELETE" });
+    assert.equal(lastDelete.status, 409);
   } finally {
     await ctx.close();
   }

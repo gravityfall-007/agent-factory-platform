@@ -19,10 +19,19 @@
           <span class="brand-name">agent<span>factory</span></span>
         </a>
 
-        <div class="workspace-switcher">
-          <div class="workspace-avatar">N</div>
-          <div class="workspace-copy"><strong>Northstar Labs</strong><small>Local workspace</small></div>
-          <span class="chevron" aria-hidden="true">⌄</span>
+        <div class="workspace-wrap">
+          <button class="workspace-switcher" id="workspace-switcher" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="workspace-menu">
+            <span class="workspace-avatar" id="workspace-avatar">N</span>
+            <span class="workspace-copy"><strong id="workspace-name">Loading…</strong><small id="workspace-company">Local workspace</small></span>
+            <span class="chevron" aria-hidden="true">⌄</span>
+          </button>
+          <div class="workspace-menu" id="workspace-menu" role="menu" hidden>
+            <div class="menu-heading">COMPANY WORKSPACES</div>
+            <div id="workspace-menu-list"></div>
+            <div class="menu-separator"></div>
+            <button type="button" role="menuitem" data-menu="new-workspace"><span aria-hidden="true">＋</span> New company workspace</button>
+            <button type="button" role="menuitem" data-menu="workspace-settings"><span aria-hidden="true">⚙</span> Workspace settings</button>
+          </div>
         </div>
 
         <div class="nav-label">WORKSPACE</div>
@@ -48,17 +57,20 @@
 
         <div class="profile-wrap">
           <button class="profile-button" id="profile-button" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="profile-menu">
-            <span class="profile-avatar">JD</span>
-            <span class="profile-copy"><strong>Jordan Davis</strong><small>Workspace admin</small></span>
+            <span class="profile-avatar" id="profile-avatar">JD</span>
+            <span class="profile-copy"><strong id="profile-name">Jordan Davis</strong><small id="profile-role">Workspace admin</small></span>
             <span class="chevron" aria-hidden="true">⌄</span>
           </button>
           <div class="profile-menu" id="profile-menu" role="menu" hidden>
+            <button type="button" role="menuitem" data-menu="new-workspace"><span aria-hidden="true">＋</span> New company workspace</button>
+            <button type="button" role="menuitem" data-menu="workspace-settings"><span aria-hidden="true">⚙</span> Workspace settings</button>
+            <div class="menu-separator" role="separator"></div>
             <button type="button" role="menuitem" data-menu="usage"><span aria-hidden="true">∑</span> Usage report</button>
             <button type="button" role="menuitem" data-menu="backup"><span aria-hidden="true">↓</span> Download backup</button>
             <button type="button" role="menuitem" data-menu="restore"><span aria-hidden="true">↑</span> Restore backup…</button>
             <button type="button" role="menuitem" data-menu="theme"><span aria-hidden="true">◐</span> Switch theme</button>
             <button type="button" role="menuitem" data-menu="help"><span aria-hidden="true">?</span> Help & shortcuts</button>
-            <button type="button" role="menuitem" class="danger-link" data-menu="reset"><span aria-hidden="true">⟲</span> Reset demo workspace</button>
+            <button type="button" role="menuitem" class="danger-link" data-menu="reset"><span aria-hidden="true">⟲</span> Reset workspace data</button>
           </div>
         </div>
       </aside>
@@ -79,7 +91,7 @@
           <section class="page-heading">
             <div>
               <div class="eyebrow"><span class="eyebrow-line"></span><span id="today-label">TODAY</span></div>
-              <h1>Good morning, Jordan <span class="wave">✳</span></h1>
+              <h1>Good morning, <span id="greeting-name">Jordan</span> <span class="wave">✳</span></h1>
               <p class="page-subtitle">Here's what's happening across your digital workforce.</p>
             </div>
             <div class="heading-actions">
@@ -240,6 +252,7 @@
         <label class="field-label" for="mcp-tools">Allowed tool names</label><textarea class="text-input mcp-tool-input" id="mcp-tools" name="allowedTools" rows="3" required placeholder="search_projects&#10;create_issue"></textarea><p class="field-hint">Enter exact names, one per line. Tool discovery and OAuth are not included.</p>
         <label class="field-label" for="mcp-token">Bearer token <span class="optional-label">optional</span></label><input class="text-input" id="mcp-token" name="bearerToken" type="password" autocomplete="new-password" placeholder="Leave blank to keep the saved token" />
         <p class="mcp-warning form-warning">The token is sent only to this local server and cannot be read back. It is stored unencrypted in an owner-only local file. The server must be reachable from your model gateway.</p>
+        <label class="mcp-enabled-option" id="mcp-clear-token-row" hidden><input id="mcp-clear-token" type="checkbox" /> Clear the saved bearer token</label>
         <label class="mcp-enabled-option"><input id="mcp-enabled" type="checkbox" checked /> Enable connector for assigned employees</label>
         <div class="dialog-actions"><button type="button" class="button button-quiet" data-close-dialog>Cancel</button><button type="submit" class="button button-primary" id="save-mcp-button">Save connector</button></div>
       </form>
@@ -248,10 +261,11 @@
     <dialog class="agent-dialog tool-dialog" id="tool-dialog" aria-labelledby="tool-dialog-title">
       <form id="tool-form">
         <div class="dialog-head"><div><span class="dialog-kicker">TOOL CATALOG</span><h2 id="tool-dialog-title">Add a tool label</h2><p>List a permission label for employee profiles.</p></div><button type="button" class="dialog-close" data-close-dialog aria-label="Close">×</button></div>
+        <input type="hidden" id="tool-original-name" />
         <label class="field-label" for="tool-name">Tool name</label><input class="text-input" id="tool-name" name="name" placeholder="e.g. Linear" maxlength="80" required />
         <label class="field-label" for="tool-category">Category</label><select class="text-input" id="tool-category" name="category"><option>Project management</option><option>Communication</option><option>CRM</option><option>Data & analytics</option><option>Productivity</option><option>Knowledge</option></select>
         <div class="simulated-note"><span aria-hidden="true">ⓘ</span> This adds metadata only. It does not connect an account or execute actions.</div>
-        <div class="dialog-actions"><button type="button" class="button button-quiet" data-close-dialog>Cancel</button><button type="submit" class="button button-primary">Add tool label</button></div>
+        <div class="dialog-actions"><button type="button" class="button button-quiet" data-close-dialog>Cancel</button><button type="submit" class="button button-primary" id="save-tool-button">Add tool label</button></div>
       </form>
     </dialog>
 
@@ -277,11 +291,70 @@
           <li>If an employee requests a granted MCP tool, the run pauses. The approval card shows the server, employee, exact tool name, and arguments.</li>
           <li>Approving resumes the run; rejecting resumes it without contacting the remote server. Every external call still needs its own approval.</li>
         </ol>
+        <h3>Company workspaces</h3>
+        <p>Each workspace has its own employees, tools, runs, approvals, and connector tokens. Use the company switcher above the navigation to create a workspace for another company or to switch between them. Workspace settings edits the company name, branches, operator, and deletion.</p>
         <h3>Local safety boundary</h3>
         <p>There is no login, tenant isolation, or billing. The server binds to loopback and stores workspace state, pending approvals, and connector tokens in owner-only files under <code>data/</code>. Tokens are not encrypted. Do not place customer secrets in the workspace.</p>
         <p>Demo mode (<code>AGENT_FACTORY_DEMO=1</code>) simulates every model and tool call, labels results as simulated, and never contacts a model or MCP server.</p>
       </div>
       <div class="dialog-actions"><button type="button" class="button button-primary" data-close-dialog>Got it</button></div>
+    </dialog>
+
+    <dialog class="agent-dialog" id="workspace-dialog" aria-labelledby="workspace-dialog-title">
+      <form id="workspace-form">
+        <div class="dialog-head"><div><span class="dialog-kicker">NEW COMPANY</span><h2 id="workspace-dialog-title">Create a workspace</h2><p>Start a clean operations console for another company.</p></div><button type="button" class="dialog-close" data-close-dialog aria-label="Close">×</button></div>
+        <label class="field-label" for="new-workspace-company">Company name</label>
+        <input class="text-input" id="new-workspace-company" name="company" placeholder="e.g. Acme Corporation" maxlength="80" required />
+        <div class="form-row">
+          <div><label class="field-label" for="new-workspace-name">Workspace name</label><input class="text-input" id="new-workspace-name" name="name" placeholder="Defaults to the company name" maxlength="80" /></div>
+          <div><label class="field-label" for="new-workspace-operator">Your name</label><input class="text-input" id="new-workspace-operator" name="operatorName" maxlength="80" placeholder="Workspace operator" /></div>
+        </div>
+        <div class="form-row">
+          <div><label class="field-label" for="new-workspace-executive">Executive agent name</label><input class="text-input" id="new-workspace-executive" name="executiveName" maxlength="80" placeholder="e.g. Avery Morgan" /></div>
+          <div><label class="field-label" for="new-workspace-role">Executive role</label><input class="text-input" id="new-workspace-role" name="executiveRole" maxlength="120" placeholder="Executive agent · CEO" /></div>
+        </div>
+        <label class="field-label" for="new-workspace-branches">Branches</label>
+        <textarea class="text-input mcp-tool-input" id="new-workspace-branches" name="branches" rows="3" placeholder="San Francisco&#10;Berlin&#10;Singapore&#10;Remote"></textarea>
+        <p class="field-hint">One branch per line. The workspace starts empty; add employees and tool grants next.</p>
+        <div class="dialog-actions"><button type="button" class="button button-quiet" data-close-dialog>Cancel</button><button type="submit" class="button button-primary" id="create-workspace-button">Create workspace</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="agent-dialog" id="settings-dialog" aria-labelledby="settings-dialog-title">
+      <form id="settings-form">
+        <div class="dialog-head"><div><span class="dialog-kicker">WORKSPACE SETTINGS</span><h2 id="settings-dialog-title">Company &amp; workspace</h2><p>Rename the workspace, manage branches, and edit the operator profile.</p></div><button type="button" class="dialog-close" data-close-dialog aria-label="Close">×</button></div>
+        <div class="form-row">
+          <div><label class="field-label" for="settings-company">Company name</label><input class="text-input" id="settings-company" name="company" maxlength="80" required /></div>
+          <div><label class="field-label" for="settings-name">Workspace name</label><input class="text-input" id="settings-name" name="name" maxlength="80" required /></div>
+        </div>
+        <div class="form-row">
+          <div><label class="field-label" for="settings-operator">Operator name</label><input class="text-input" id="settings-operator" name="operatorName" maxlength="80" required /></div>
+          <div><label class="field-label" for="settings-operator-role">Operator role</label><input class="text-input" id="settings-operator-role" name="operatorRole" maxlength="120" required /></div>
+        </div>
+        <label class="field-label" for="settings-branches">Branches</label>
+        <textarea class="text-input mcp-tool-input" id="settings-branches" name="branches" rows="4"></textarea>
+        <p class="field-hint">One branch per line. A branch cannot be removed while an employee is assigned to it — move that employee first.</p>
+        <div class="danger-zone">
+          <div><strong>Delete this workspace</strong><small>Removes its employees, runs, approvals, and connector tokens. At least one workspace must remain.</small></div>
+          <button type="button" class="danger-link" id="delete-workspace-button">Delete workspace</button>
+        </div>
+        <div class="dialog-actions"><button type="button" class="button button-quiet" data-close-dialog>Cancel</button><button type="submit" class="button button-primary" id="save-settings-button">Save settings</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="agent-dialog" id="executive-dialog" aria-labelledby="executive-dialog-title">
+      <form id="executive-form">
+        <div class="dialog-head"><div><span class="dialog-kicker">EXECUTIVE AGENT</span><h2 id="executive-dialog-title">Edit the executive</h2><p>The agent that plans tasks and synthesizes employee results.</p></div><button type="button" class="dialog-close" data-close-dialog aria-label="Close">×</button></div>
+        <div class="form-row">
+          <div><label class="field-label" for="executive-name">Name</label><input class="text-input" id="executive-name" name="name" maxlength="80" required /></div>
+          <div><label class="field-label" for="executive-status">Availability</label><select class="text-input" id="executive-status" name="status"><option value="active">Active</option><option value="idle">Idle</option></select></div>
+        </div>
+        <label class="field-label" for="executive-role">Role</label>
+        <input class="text-input" id="executive-role" name="role" maxlength="120" required />
+        <div class="tool-access-heading"><div><strong>Tool permission labels</strong><small>Metadata only · no live account connection</small></div></div>
+        <div class="form-tool-options" id="executive-tool-options"></div>
+        <div class="dialog-actions"><button type="button" class="button button-quiet" data-close-dialog>Cancel</button><button type="submit" class="button button-primary" id="save-executive-button">Save executive</button></div>
+      </form>
     </dialog>
 
     <dialog class="palette-dialog" id="palette-dialog" aria-label="Command palette">

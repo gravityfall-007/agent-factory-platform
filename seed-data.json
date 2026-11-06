@@ -221,10 +221,20 @@
     }
   ],
   "tasks": [],
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "usage": {
     "inputTokens": 0,
     "outputTokens": 0,
     "totalTokens": 0
-  }
+  },
+  "operator": {
+    "name": "Jordan Davis",
+    "role": "Workspace admin"
+  },
+  "branches": [
+    "San Francisco",
+    "Berlin",
+    "Singapore",
+    "Remote"
+  ]
 }
