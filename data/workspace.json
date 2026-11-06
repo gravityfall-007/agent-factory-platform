@@ -1,0 +1,266 @@
+{
+  "executive": {
+    "id": "exec",
+    "name": "Avery Morgan",
+    "role": "Executive agent · CEO",
+    "branch": "Executive",
+    "status": "active",
+    "tools": [
+      "Slack",
+      "Notion"
+    ],
+    "mcpGrants": []
+  },
+  "agents": [
+    {
+      "id": "maya",
+      "name": "Maya Chen",
+      "role": "Customer Success Lead",
+      "branch": "San Francisco",
+      "managerId": "exec",
+      "capabilities": [
+        "renewal planning",
+        "account research"
+      ],
+      "status": "active",
+      "tools": [
+        "Slack",
+        "Salesforce",
+        "Notion"
+      ],
+      "mcpGrants": []
+    },
+    {
+      "id": "theo",
+      "name": "Theo Park",
+      "role": "Revenue Analyst",
+      "branch": "San Francisco",
+      "managerId": "exec",
+      "capabilities": [
+        "pipeline analysis",
+        "forecasting"
+      ],
+      "status": "active",
+      "tools": [
+        "Salesforce",
+        "Snowflake"
+      ],
+      "mcpGrants": []
+    },
+    {
+      "id": "sofia",
+      "name": "Sofia Weber",
+      "role": "People Operations",
+      "branch": "Berlin",
+      "managerId": "exec",
+      "capabilities": [
+        "onboarding",
+        "policy lookup"
+      ],
+      "status": "active",
+      "tools": [
+        "Slack",
+        "Notion"
+      ],
+      "mcpGrants": []
+    },
+    {
+      "id": "jonas",
+      "name": "Jonas Richter",
+      "role": "Product Researcher",
+      "branch": "Berlin",
+      "managerId": "exec",
+      "capabilities": [
+        "feedback analysis",
+        "research synthesis"
+      ],
+      "status": "idle",
+      "tools": [
+        "Notion",
+        "Snowflake"
+      ],
+      "mcpGrants": []
+    },
+    {
+      "id": "amara",
+      "name": "Amara Tan",
+      "role": "Support Specialist",
+      "branch": "Singapore",
+      "managerId": "exec",
+      "capabilities": [
+        "case triage",
+        "support response drafts"
+      ],
+      "status": "active",
+      "tools": [
+        "Slack",
+        "Salesforce"
+      ],
+      "mcpGrants": []
+    },
+    {
+      "id": "ethan",
+      "name": "Ethan Brooks",
+      "role": "Marketing Coordinator",
+      "branch": "Remote",
+      "managerId": "exec",
+      "capabilities": [
+        "campaign planning",
+        "content briefs"
+      ],
+      "status": "active",
+      "tools": [
+        "Slack",
+        "Notion"
+      ],
+      "mcpGrants": []
+    }
+  ],
+  "tools": [
+    {
+      "name": "Salesforce",
+      "category": "CRM",
+      "connected": true,
+      "glyph": "S",
+      "style": "crm"
+    },
+    {
+      "name": "Slack",
+      "category": "Communication",
+      "connected": true,
+      "glyph": "#",
+      "style": "chat"
+    },
+    {
+      "name": "Notion",
+      "category": "Knowledge",
+      "connected": true,
+      "glyph": "N",
+      "style": "docs"
+    },
+    {
+      "name": "Snowflake",
+      "category": "Data & analytics",
+      "connected": true,
+      "glyph": "❄",
+      "style": "data"
+    }
+  ],
+  "approvals": [],
+  "activities": [
+    {
+      "id": "a4670d2d-7a24-41a2-bfbb-52dd15233d55",
+      "kind": "complete",
+      "icon": "✦",
+      "agent": "Avery Morgan",
+      "action": "completed an employee task workflow for",
+      "target": "@ Jonas, look into new product we can explore",
+      "detail": "2 employee agents · model-backed",
+      "time": "just now"
+    },
+    {
+      "id": "evt-1793952502561",
+      "kind": "complete",
+      "icon": "✓",
+      "agent": "Theo Park",
+      "action": "received approval to",
+      "target": "Publish Q4 pipeline forecast",
+      "detail": "Local workspace · seeded review example",
+      "time": "just now"
+    },
+    {
+      "id": "evt-1793952501319",
+      "kind": "complete",
+      "icon": "✓",
+      "agent": "Maya Chen",
+      "action": "received approval to",
+      "target": "Send renewal offer to Acme Studio",
+      "detail": "Local workspace · seeded review example",
+      "time": "just now"
+    },
+    {
+      "id": "evt-1",
+      "kind": "complete",
+      "icon": "✓",
+      "agent": "Sofia Weber",
+      "action": "finished onboarding checklist for",
+      "target": "Northwind GmbH",
+      "detail": "Berlin · Notion",
+      "time": "2 min ago"
+    },
+    {
+      "id": "evt-2",
+      "kind": "approval",
+      "icon": "◷",
+      "agent": "Maya Chen",
+      "action": "requested approval to send a renewal offer",
+      "target": "Acme Studio",
+      "detail": "San Francisco · Salesforce",
+      "time": "4 min ago"
+    },
+    {
+      "id": "evt-3",
+      "kind": "tool",
+      "icon": "↗",
+      "agent": "Ethan Brooks",
+      "action": "drafted campaign brief from",
+      "target": "Launch planning notes",
+      "detail": "Remote · Notion",
+      "time": "11 min ago"
+    },
+    {
+      "id": "evt-4",
+      "kind": "complete",
+      "icon": "✓",
+      "agent": "Amara Tan",
+      "action": "resolved a support request for",
+      "target": "Morrow Health",
+      "detail": "Singapore · Salesforce",
+      "time": "18 min ago"
+    },
+    {
+      "id": "evt-5",
+      "kind": "approval",
+      "icon": "◷",
+      "agent": "Theo Park",
+      "action": "requested review of the",
+      "target": "Q4 pipeline forecast",
+      "detail": "San Francisco · Snowflake",
+      "time": "22 min ago"
+    },
+    {
+      "id": "evt-6",
+      "kind": "tool",
+      "icon": "↗",
+      "agent": "Jonas Richter",
+      "action": "summarized research signals in",
+      "target": "Customer feedback digest",
+      "detail": "Berlin · Snowflake",
+      "time": "35 min ago"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "fb507577-0554-494e-ad1e-fcf65c1649ad",
+      "prompt": "@ Jonas, look into new product we can explore",
+      "summary": "**Status: No validated new-product recommendation yet.** Theo Park returned no analysis. Maya Chen produced a draft hypothesis memo only — she explicitly had no access to Slack, Salesforce, or Notion and retrieved no records. No external systems were queried and no customer evidence was pulled.\n\n**What we have**\nMaya surfaced three unvalidated opportunity hypotheses from standard customer-success patterns:\n\n1. **Self-serve reporting / QBR pack** — customers and CS hand-build ROI reports; possible renewal-value risk.\n2. **Onboarding / time-to-value** — first-90-day implementation friction; possible first-renewal churn driver.\n3. **Usage visibility + license reclamation** — admins lack seat/usage data; possible downgrade driver, cheapest to defuse.\n\n**Assumptions / caveats**\n- These are hypotheses, not customer findings.\n- No churn, renewal, feature-request, pipeline, or revenue data was reviewed.\n- Theo’s pipeline/revenue opportunity analysis is missing, so we have no demand-side signal.\n- Do not cite these as validated opportunities or take them to roadmap yet.\n\n**Recommended next step**\nAsk Maya to pull the specific Salesforce/Slack/Notion records she listed — closed-lost reasons, churn/downgrade reasons, feature-request cases, renewal-risk fields, QBR notes — and test the three hypotheses against actual account data. Rerun Theo’s pipeline/revenue analysis before choosing a product to explore.",
+      "status": "done",
+      "createdAt": "2026-11-06T12:04:28.577Z",
+      "assignments": [
+        {
+          "employeeId": "theo",
+          "employeeName": "Theo Park",
+          "task": "Analyze available pipeline and revenue context to identify signals of unmet demand or adjacent product opportunities. Produce a short memo with the top 3 opportunity areas, evidence/assumptions, target customer segments, and recommended validation steps. Do not claim access to any external system beyond available tools.",
+          "result": ""
+        },
+        {
+          "employeeId": "maya",
+          "employeeName": "Maya Chen",
+          "task": "Review customer success and account research context for recurring pain points, renewal risks, and product/feature requests that could inform a new product to explore. Produce a short memo with the top 3 customer-derived opportunities, supporting assumptions, and suggested discovery questions.",
+          "result": "**MEMO — Customer-derived product opportunities**\nTo: Jonas · From: Maya Chen, Customer Success Lead · Status: draft for review\n\n---\n\n**Access note (please read first):** In this session I had no live connection to Slack, Salesforce, or Notion — no records were retrievable. So this memo is **not** an evidence review of specific accounts. It's a structured set of hypotheses built from standard CS signal patterns, with every claim labeled as unvalidated. Do not cite these as customer findings until I've pulled the underlying records.\n\n**What I would pull to validate (and can, on request):**\n- Salesforce: closed-lost reasons, churn/downgrade reasons, cases tagged \"feature request,\" renewal-risk fields, open opportunities with product blockers.\n- Slack: #customer-success, #escalations, #product-feedback, QBR and renewal threads.\n- Notion: QBR notes, account plans, win/loss and roadmap-feedback docs.\n\n---\n\n**Top 3 opportunities (hypotheses, all currently unvalidated)**\n\n**1. Self-serve reporting / QBR pack**\n*Pattern:* CS and customers repeatedly hand-build the same usage and value reports; requests route through CS instead of the product.\n*Retention link:* Low perceived value at renewal when the customer can't self-demonstrate ROI.\n*Why it's a product, not a service fix:* It's a repeatable, templated output — buildable once, reduces CS load permanently.\n*Confirm by:* Counting custom-report requests per account in cases/Slack over 2 quarters; checking whether at-risk renewals cluster in accounts with low report adoption.\n\n**2. Onboarding / time-to-value**\n*Pattern:* Repeated implementation friction and professional-services asks during first 90 days.\n*Retention link:* First-renewal churn is typically concentrated in accounts that never reached a defined activation milestone.\n*Confirm by:* Comparing activation-milestone timing against first-renewal outcome in Salesforce; tallying PS hours sold vs. delivered.\n\n**3. Usage visibility + license reclamation**\n*Pattern:* Admins can't see who's using what or forecast seats, so renewals get argued from anecdote rather than data.\n*Retention link:* \"We don't know if we're getting value\" is a downgrade driver more than a churn driver — but it's the cheapest one to defuse.\n*Bonus:* The"
+        }
+      ]
+    }
+  ],
+  "connectors": []
+}

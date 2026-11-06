@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#101412" />
+    <meta name="description" content="Agent Factory is a simulated operations console for digital employees." />
+    <title>Agent Factory — Operations</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Main navigation">
+        <a class="brand" href="#overview" aria-label="Agent Factory home">
+          <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+          <span class="brand-name">agent<span>factory</span></span>
+        </a>
+
+        <div class="workspace-switcher">
+          <div class="workspace-avatar">N</div>
+          <div class="workspace-copy"><strong>Northstar Labs</strong><small>Workspace</small></div>
+          <span class="chevron" aria-hidden="true">⌄</span>
+        </div>
+
+        <div class="nav-label">WORKSPACE</div>
+        <nav class="primary-nav">
+          <a class="nav-item active" href="#overview" data-view="overview"><span class="nav-icon">◫</span>Overview</a>
+          <a class="nav-item" href="#employees" data-view="employees"><span class="nav-icon">♙</span>Employees <span class="nav-count" id="agent-nav-count">6</span></a>
+          <a class="nav-item" href="#approvals" data-view="approvals"><span class="nav-icon">◷</span>Approvals <span class="nav-count attention" id="approval-nav-count">2</span></a>
+          <a class="nav-item" href="#integrations" data-view="integrations"><span class="nav-icon">⌘</span>Integrations</a>
+          <a class="nav-item" href="#activity" data-view="activity"><span class="nav-icon">≋</span>Activity</a>
+        </nav>
+
+        <div class="nav-label branch-label">BRANCHES</div>
+        <div class="branch-list">
+          <a href="#employees" class="branch-item" data-branch="all"><span class="branch-dot all-dot">✳</span>All branches <span class="branch-count">4</span></a>
+          <a href="#employees" class="branch-item" data-branch="San Francisco"><span class="branch-dot sf"></span>San Francisco <span class="branch-count">2</span></a>
+          <a href="#employees" class="branch-item" data-branch="Berlin"><span class="branch-dot berlin"></span>Berlin <span class="branch-count">2</span></a>
+          <a href="#employees" class="branch-item" data-branch="Singapore"><span class="branch-dot singapore"></span>Singapore <span class="branch-count">1</span></a>
+          <a href="#employees" class="branch-item" data-branch="Remote"><span class="branch-dot remote"></span>Remote <span class="branch-count">1</span></a>
+        </div>
+
+        <div class="sidebar-spacer"></div>
+        <div class="usage-card">
+          <div class="usage-top"><span>Demo token budget</span><span class="usage-percent">68%</span></div>
+          <div class="usage-track"><span></span></div>
+          <p>68.4k of 100k simulated tokens</p>
+          <button class="usage-link" id="usage-info-button">View demo usage <span>↗</span></button>
+        </div>
+        <button class="profile-button">
+          <span class="profile-avatar">JD</span>
+          <span class="profile-copy"><strong>Jordan Davis</strong><small>Workspace admin</small></span>
+          <span class="chevron">⌄</span>
+        </button>
+      </aside>
+
+      <main class="main-content" id="overview">
+        <header class="topbar">
+          <div class="breadcrumbs"><span>Workspace</span><span class="crumb-slash">/</span><strong id="current-view-label">Overview</strong></div>
+          <div class="topbar-actions">
+            <div class="demo-pill gateway-pill" id="gateway-status" role="status" aria-live="polite"><span class="demo-pulse"></span> CHECKING MODEL GATEWAY</div>
+            <button class="icon-button" aria-label="Search" title="Search">⌕</button>
+            <button class="icon-button notification-button" aria-label="Notifications" title="Notifications">♧<i></i></button>
+            <button class="help-button">Help <span>↗</span></button>
+          </div>
+        </header>
+
+        <div class="content-wrap">
+          <section class="page-heading">
+            <div>
+              <div class="eyebrow"><span class="eyebrow-line"></span>FRIDAY, OCTOBER 24, 2025</div>
+              <h1>Good morning, Jordan <span class="wave">✳</span></h1>
+              <p class="page-subtitle">Here's what's happening across your digital workforce.</p>
+            </div>
+            <div class="heading-actions">
+              <button class="button button-quiet" id="export-button"><span>↓</span> Export report</button>
+              <button class="button button-primary" id="add-agent-button"><span class="button-plus">+</span> Create employee</button>
+            </div>
+          </section>
+
+          <section class="metrics-grid" aria-label="Simulated organization metrics">
+            <article class="metric-card">
+              <div class="metric-label">Active agents <span class="metric-source">DEMO</span><span class="metric-icon green">♙</span></div>
+              <div class="metric-value" id="active-agents-metric">6<span class="metric-total"> / 7</span></div>
+              <div class="metric-foot"><span class="trend up">↑ 2</span><span>vs. last week · seeded</span><div class="sparkline green-spark"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+            </article>
+            <article class="metric-card">
+              <div class="metric-label">Tasks completed <span class="metric-source">DEMO</span><span class="metric-icon blue">✓</span></div>
+              <div class="metric-value">1,284</div>
+              <div class="metric-foot"><span class="trend up">↑ 12.8%</span><span>vs. last week · seeded</span><div class="sparkline blue-spark"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+            </article>
+            <article class="metric-card">
+              <div class="metric-label">Awaiting approval <span class="metric-source">DEMO</span><span class="metric-icon amber">◷</span></div>
+              <div class="metric-value" id="pending-approvals-metric">02</div>
+              <div class="metric-foot"><span class="trend flat">Needs attention</span><span id="approval-employee-count">across 2 employees</span><div class="sparkline amber-spark"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+            </article>
+            <article class="metric-card">
+              <div class="metric-label">Hours saved <span class="metric-source">DEMO</span><span class="metric-icon violet">◴</span></div>
+              <div class="metric-value">342<span class="metric-unit">h</span></div>
+              <div class="metric-foot"><span class="trend up">↑ 8.4%</span><span>this month · seeded</span><div class="sparkline violet-spark"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+            </article>
+          </section>
+
+          <section class="panel task-panel" id="workbench" aria-labelledby="task-panel-title">
+            <div class="task-panel-copy">
+              <div class="eyebrow"><span class="eyebrow-line"></span>EXECUTIVE WORKBENCH</div>
+              <h2 id="task-panel-title">Give your executive a task</h2>
+              <p class="panel-subtitle">The CEO agent will plan the work, delegate to specialists, and synthesize their results.</p>
+            </div>
+            <form id="task-form" class="task-form">
+              <label class="sr-only" for="task-prompt">Task for the executive agent</label>
+              <textarea id="task-prompt" name="prompt" rows="3" maxlength="4000" placeholder="What should your digital workforce work on?" required></textarea>
+              <div class="task-form-footer">
+                <span class="task-safety-note"><span aria-hidden="true">ⓘ</span> Model calls are live when configured. Granted MCP tools pause for your approval before an external call.</span>
+                <button class="button button-primary" id="run-task-button" type="submit"><span aria-hidden="true">↗</span> Run task</button>
+              </div>
+            </form>
+            <div class="task-message" id="task-message" role="status" aria-live="polite">Checking local server…</div>
+            <div class="task-results" id="task-results" aria-live="polite"></div>
+          </section>
+
+          <section class="overview-grid">
+            <article class="panel org-panel" id="employees">
+              <div class="panel-header">
+          <div><div class="panel-title-row"><h2>Organization structure</h2><span class="live-tag"><i></i> DEMO</span></div><p class="panel-subtitle">Your executive agent and branch employees</p></div>
+                <button class="text-button" id="view-all-agents">View all employees <span>→</span></button>
+              </div>
+              <div class="org-chart" id="org-chart"></div>
+            </article>
+
+            <article class="panel approvals-panel" id="approvals">
+              <div class="panel-header approval-header">
+                <div><div class="panel-title-row"><h2>Needs your attention</h2><span class="count-badge" id="approval-count-badge">2</span></div><p class="panel-subtitle">Review local examples and requested MCP actions</p></div>
+                <button class="more-button" aria-label="More approval options">···</button>
+              </div>
+              <div class="approval-list" id="approval-list"></div>
+              <div class="mcp-pending-list" id="mcp-pending-list"></div>
+              <button class="approval-footer" id="all-approvals">View approval history <span>→</span></button>
+            </article>
+          </section>
+
+          <section class="bottom-grid">
+            <article class="panel activity-panel" id="activity">
+              <div class="panel-header">
+                <div><div class="panel-title-row"><h2>Activity feed</h2><span class="live-tag"><i></i> LOCAL HISTORY</span></div><p class="panel-subtitle">Seeded examples and persisted task runs</p></div>
+                <div class="activity-actions"><button class="filter-button" id="activity-filter">All activity <span>⌄</span></button><button class="more-button" aria-label="More activity options">···</button></div>
+              </div>
+              <div class="activity-feed" id="activity-feed"></div>
+              <button class="activity-footer" id="load-activity">View all activity <span>→</span></button>
+            </article>
+
+            <article class="panel integrations-panel" id="integrations">
+              <div class="panel-header">
+                <div><div class="panel-title-row"><h2>Integrations</h2><span class="tool-count" id="tool-count">4 tools</span></div><p class="panel-subtitle">MCP connections run through the server after approval</p></div>
+                <button class="connect-tool-button compact" id="add-mcp-connector">+ Add MCP server</button>
+              </div>
+              <div class="mcp-warning">MCP tools send their displayed arguments to the configured remote server after you approve each call. Connector bearer tokens are stored locally without encryption.</div>
+              <div class="mcp-connector-list" id="mcp-connector-list"><div class="approval-empty">Loading connector settings…</div></div>
+              <div class="panel-subsection-title"><strong>Tool catalog</strong><small>Permission labels only · no account connection</small></div>
+              <div class="tool-list" id="tool-list"></div>
+              <button class="connect-tool-button" id="add-tool-button"><span>+</span> Add a tool label</button>
+            </article>
+          </section>
+
+          <footer class="page-footer"><span>Agent Factory <span class="footer-dot">•</span> Local workspace</span><span id="sync-status">Connecting… <i class="sync-dot"></i></span></footer>
+        </div>
+      </main>
+    </div>
+
+    <dialog class="agent-dialog" id="agent-dialog" aria-labelledby="agent-dialog-title">
+      <form id="agent-form" method="dialog">
+        <div class="dialog-head"><div><span class="dialog-kicker">DIGITAL EMPLOYEE</span><h2 id="agent-dialog-title">Create employee</h2><p>Define a specialist for your organization.</p></div><button type="button" class="dialog-close" data-close-dialog aria-label="Close">×</button></div>
+        <input type="hidden" id="agent-id" />
+        <label class="field-label" for="agent-name">Employee name</label>
+        <input class="text-input" id="agent-name" name="name" placeholder="e.g. Maya Chen" required maxlength="48" />
+        <div class="form-row">
+          <div><label class="field-label" for="agent-role">Role</label><input class="text-input" id="agent-role" name="role" placeholder="e.g. Customer success" required maxlength="48" /></div>
+          <div><label class="field-label" for="agent-branch">Branch</label><select class="text-input" id="agent-branch" name="branch"><option>San Francisco</option><option>Berlin</option><option>Singapore</option><option>Remote</option></select></div>
+        </div>
+        <div class="form-row">
+          <div><label class="field-label" for="agent-manager">Reports to</label><select class="text-input" id="agent-manager" name="manager"></select></div>
+          <div><label class="field-label" for="agent-status">Availability</label><select class="text-input" id="agent-status" name="status"><option value="active">Active</option><option value="idle">Idle</option></select></div>
+        </div>
+        <label class="field-label" for="agent-capabilities">Capabilities</label>
+        <input class="text-input" id="agent-capabilities" name="capabilities" placeholder="e.g. account research, renewal planning" maxlength="120" />
+        <p class="field-hint">Separate capabilities with commas.</p>
+        <div class="tool-access-heading"><div><strong>Tool access</strong><small>Permission labels only · no live connections</small></div></div>
+        <div class="form-tool-options" id="form-tool-options"></div>
+        <div class="tool-access-heading"><div><strong>Remote MCP tool grants</strong><small>Only selected tools are available; every call still needs your approval.</small></div></div>
+        <div class="form-tool-options mcp-grant-options" id="form-mcp-options"></div>
+        <div class="dialog-actions"><button type="button" class="button button-quiet" data-close-dialog>Cancel</button><button type="submit" class="button button-primary" id="save-agent-button">Create employee</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="agent-dialog tool-dialog" id="mcp-dialog" aria-labelledby="mcp-dialog-title">
+      <form id="mcp-form" method="dialog">
+        <div class="dialog-head"><div><span class="dialog-kicker">REMOTE MCP SERVER</span><h2 id="mcp-dialog-title">Add MCP server</h2><p>Register an HTTPS endpoint and explicitly allow tool names.</p></div><button type="button" class="dialog-close" data-close-dialog aria-label="Close">×</button></div>
+        <input type="hidden" id="mcp-connector-id" />
+        <label class="field-label" for="mcp-label">Display name</label><input class="text-input" id="mcp-label" name="label" maxlength="64" required placeholder="e.g. Internal project tracker" />
+        <label class="field-label" for="mcp-url">HTTPS endpoint</label><input class="text-input" id="mcp-url" name="endpointUrl" type="url" required placeholder="https://mcp.example.com/mcp" />
+        <label class="field-label" for="mcp-description">Description</label><input class="text-input" id="mcp-description" name="description" maxlength="240" placeholder="What this server can do" />
+        <label class="field-label" for="mcp-tools">Allowed tool names</label><textarea class="text-input mcp-tool-input" id="mcp-tools" name="allowedTools" rows="3" required placeholder="search_projects\ncreate_issue"></textarea><p class="field-hint">Enter exact names, one per line. Tool discovery and OAuth are not included.</p>
+        <label class="field-label" for="mcp-token">Bearer token <span class="optional-label">optional</span></label><input class="text-input" id="mcp-token" name="bearerToken" type="password" autocomplete="new-password" placeholder="Leave blank to keep the saved token" />
+        <p class="mcp-warning form-warning">The token is sent only to this local server and cannot be read back. It is stored unencrypted in an owner-only local file. The server must be reachable from your model gateway.</p>
+        <label class="mcp-enabled-option"><input id="mcp-enabled" type="checkbox" checked /> Enable connector for assigned employees</label>
+        <div class="dialog-actions"><button type="button" class="button button-quiet" data-close-dialog>Cancel</button><button type="submit" class="button button-primary" id="save-mcp-button">Save connector</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="agent-dialog tool-dialog" id="tool-dialog" aria-labelledby="tool-dialog-title">
+      <form id="tool-form" method="dialog">
+        <div class="dialog-head"><div><span class="dialog-kicker">TOOL CATALOG</span><h2 id="tool-dialog-title">Add a tool label</h2><p>List a permission label for employee profiles.</p></div><button type="button" class="dialog-close" data-close-dialog aria-label="Close">×</button></div>
+        <label class="field-label" for="tool-name">Tool name</label><input class="text-input" id="tool-name" name="name" placeholder="e.g. Linear" maxlength="32" required />
+        <label class="field-label" for="tool-category">Category</label><select class="text-input" id="tool-category" name="category"><option>Project management</option><option>Communication</option><option>CRM</option><option>Data & analytics</option><option>Productivity</option></select>
+        <div class="simulated-note"><span>ⓘ</span> This adds metadata only. It does not connect an account or execute actions.</div>
+        <div class="dialog-actions"><button type="button" class="button button-quiet" data-close-dialog>Cancel</button><button type="submit" class="button button-primary">Add tool label</button></div>
+      </form>
+    </dialog>
+
+    <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
+    <script src="app.js"></script>
+  </body>
+</html>
